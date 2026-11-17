@@ -250,3 +250,20 @@ change needs a single shared contract for bump reservations and exact-offset
 overlap checks, plus tests for simultaneous bind requests and interval
 collision. Until then, the checked arithmetic prevents malformed ranges but
 does not make concurrent reservations safe.
+
+
+## Shared BAR and VRAM range guards (2026-11-17)
+
+A related bounds issue existed in the common register helpers:
+BAR0/BAR2 accessors and bulk BAR0 copy/set helpers checked ranges using
+`offset + length > mapped_size`. That addition can wrap before the comparison.
+They now use a shared subtraction-based `amdgpu_range_fits` check, which
+requires `offset <= total` and `length <= total - offset`. The same guard
+now bounds MM_INDEX VRAM dword reads/writes against the full VRAM size, and
+`vram_memcpy` validates the requested span before either the BAR0 or MM_INDEX
+path. The generic helper is host-tested through the GART bounds suite.
+
+This change hardens common memory-access bounds but is still only source-level
+review plus host tests of the arithmetic primitive. The IOKit register header
+and hardware accessors are not compiled by the Linux host workflow, and no
+BAR access has been exercised on a GPU.
