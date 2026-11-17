@@ -64,6 +64,14 @@ It does not write PTEs, flush HDP, invalidate TLBs, wait for GPU fences, or
 manage `SysMem` lifetimes. Those responsibilities must remain in the
 driver layer.
 
+A separate host-side `GARTMappingLifecycle` helper now models the required
+ordering: `UNMAPPED -> PTE_WRITTEN -> MAPPED -> IN_FLIGHT -> RETIRING ->
+QUIESCENT -> PTES_CLEARED -> REUSABLE`. It counts in-flight uses, blocks new
+uses after retirement begins, and supports a fail-closed `QUARANTINED` state.
+It does not execute any of the hardware operations represented by those
+transitions and is not yet connected to the kext. Callers must serialize its
+state changes.
+
 Run its host suite with `make -C src/navi48-bringup/tests/gart_range_allocator test`.
 The suite includes deterministic reuse/coalescing, invalid-input and metadata
 capacity checks, plus 50,000 randomized allocate/free operations with full
@@ -72,8 +80,8 @@ suite; they still need a fresh run after this API change.
 
 ## Next safe engineering step
 
-Add a host-side lifecycle model that represents the states
-`allocated -> mapped -> in-flight -> retired -> reusable` and test failure
-paths (especially invalidation timeout). Then map each real caller to those
-states. Only after that should the driver integrate a free-list, and only in
-the `GARTContext` path if the ownership audit confirms it is still used.
+Map each real caller to the lifecycle states and establish the real fence,
+PTE-clear, HDP-flush and TLB-invalidation sequence, including timeout paths.
+Then add tests for those caller contracts. Only after that should the driver
+integrate a free-list, and only in the `GARTContext` path if the ownership
+audit confirms it is still used.
