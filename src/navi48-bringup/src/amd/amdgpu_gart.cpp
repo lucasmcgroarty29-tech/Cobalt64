@@ -190,7 +190,15 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
         bar0_memcpy_to_vram(dev, pteOffsetInPT,
                             &pte, sizeof(pte));
     }
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        // PTE writes may be partially visible. Consume the bump range and retain
+        // the sysmem allocation permanently; returning it could let a stale GPU
+        // translation access memory that has already been reallocated.
+        gart.nextFreeOffset = gartOff + roundedSize;
+        GART_LOG("bind: HDP flush unavailable; quarantining %llu bytes and GART range at %#llx",
+                 (unsigned long long)roundedSize, (unsigned long long)gartMCAddr);
+        return kIOReturnNotReady;
+    }
 
     outBinding->sysmem      = m;
     outBinding->busAddr     = m.bus;
@@ -271,7 +279,14 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
         bar0_memcpy_to_vram(dev, pteOffsetInPT,
                             &pte, sizeof(pte));
     }
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        // The range was already consumed for a fresh binding. For reuse, keep
+        // the existing binding metadata and leave the caller's new bus range owned
+        // by the caller; either way, do not report a usable mapping.
+        GART_LOG("bind_existing: HDP flush unavailable; refusing mapping success at %#llx",
+                 (unsigned long long)gartMCAddr);
+        return kIOReturnNotReady;
+    }
 
     binding->sysmem      = SysMem{};
     binding->busAddr     = busAddr;
