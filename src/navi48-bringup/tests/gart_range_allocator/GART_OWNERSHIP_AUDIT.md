@@ -329,3 +329,28 @@ helpers now validate the entire requested range against the aperture and
 reject an absolute end-address overflow before iterating page by page.
 These checks do not map or modify GPU memory; they only make the existing
 inspection and transfer guards fail closed on malformed ranges.
+
+
+## Bind API call-site inventory and TLB failure handling (2026-11-17)
+
+A source scan of the AMD C++ directory and the Apple/bring-up glue found the
+active runtime mapping calls in `gmc_bind_existing()`: initialization paths
+for PDB0, CP, MES and SDMA, plus the CSB publisher and fast-copy staging/read
+back paths in `Navi48Bringup.cpp`. The legacy `GARTContext` APIs
+(`gart_bind_sysmem`, `gart_bind_existing`, `gart_unbind`) have definitions
+but no direct in-tree callsites in the scanned C++ sources. Likewise,
+`gmc_bind_at()` is exposed through `navi48_gart_bind_at()`, but no direct
+in-tree caller was found in the scanned glue. This is not proof that external
+or dynamically resolved callers do not exist; do not delete those APIs on
+that basis.
+
+The call-site scan found one more ignored TLB result in native S1b. That path
+programs a non-default GFXHUB VMID and previously discarded the return from
+`gmc_flush_gpu_tlb()` before running VM legs. It now latches the sequence
+stopped if the invalidate does not acknowledge, so the native VM legs are not
+run against an unconfirmed translation-cache state.
+
+No automatic TLB flush was added to the bind helpers. The right flush scope
+depends on which hub and VMID can cache each mapping; the current call sites
+do not encode one universal context mask. The separate bind/retire lifecycle
+model remains the place to define that contract before live PTE reclamation.
