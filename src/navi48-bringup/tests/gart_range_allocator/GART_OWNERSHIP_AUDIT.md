@@ -211,7 +211,7 @@ returned bus span fails validation.
 
 The host suite covers rounding boundaries, zero and overflowing sizes,
 out-of-range intervals, PTE-table bounds, absolute VRAM-offset overflow,
-physical-address alignment and span overflow, and checked addition. It runs
+physical-address alignment and span overflow, checked addition, and VMID bit indices (0–15 only). The live TLB flush helper now rejects VMIDs outside that range before constructing its request mask, avoiding an unchecked shift. It runs
 under AddressSanitizer and UndefinedBehaviorSanitizer. The workflow now runs
 these host checks when either mapping source file or the checked-arithmetic
 header changes.
