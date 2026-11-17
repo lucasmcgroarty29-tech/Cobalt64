@@ -787,7 +787,12 @@ IOReturn n1c_open(BringupContext &ctx, bool ws, N1cRef *out) {
             const uint64_t zero = 0;
             for (uint32_t i = 0; i < N48N_FENCE_SLOTS; i++)
                 bar0_memcpy_to_vram(*dev, gmc.gart_pt_vram_offset + (win.gartOff / kPage + i) * 8ull, &zero, sizeof(zero));
-            amdgpu_hdp_flush(*dev);
+            if (!amdgpu_hdp_flush(*dev)) {
+                win.poisoned = true;
+                N1C_LOG("open refused: HDP flush unavailable while initialising fence window; its GART range is quarantined");
+                rc = kIOReturnNotReady;
+                break;
+            }
             N1C_LOG("fence window reserved: %u GART pages at mc %#llx (offset %#llx), every PTE invalid until a GTT fence target binds it",
                     N48N_FENCE_SLOTS, (unsigned long long)win.mc, (unsigned long long)win.gartOff);
         }
@@ -797,7 +802,13 @@ IOReturn n1c_open(BringupContext &ctx, bool ws, N1cRef *out) {
             const uint64_t off = gPark.a.gpu_va - ctx.gmc.vram_start;
             if (off + gPark.a.size > dev->bar0Size) { ctx.gmc.vram_alloc.free(gPark.a); rc = kIOReturnNoMemory; break; }
             bar0_memset_vram(*dev, off, 0, gPark.a.size);
-            amdgpu_hdp_flush(*dev);
+            if (!amdgpu_hdp_flush(*dev)) {
+                ctx.gmc.vram_alloc.free(gPark.a);
+                gPark.a = VRAMAllocation{};
+                N1C_LOG("open refused: HDP flush unavailable while zeroing park root");
+                rc = kIOReturnNotReady;
+                break;
+            }
             gPark.pa = pa_of_mc(gPark.a.gpu_va);
             gPark.have = true;
         }
@@ -824,7 +835,11 @@ IOReturn n1c_open(BringupContext &ctx, bool ws, N1cRef *out) {
         PtMem mem{ s };
         s->rootPa = mem.alloc_page();
         if (s->rootPa == 0ull) { N1C_LOG("open refused (NoMemory): no VRAM for the root table"); rc = kIOReturnNoMemory; break; }
-        amdgpu_hdp_flush(*dev);
+        if (!amdgpu_hdp_flush(*dev)) {
+            N1C_LOG("open refused: HDP flush unavailable while publishing new root page");
+            rc = kIOReturnNotReady;
+            break;
+        }
         if (openNow == 0u) {
             // The first session: zero the native seqno slot while the ring is idle, restart the count, and start the clock.
             *seq_slot() = 0ull;
@@ -1416,9 +1431,12 @@ IOReturn n1c_bo_import_host(const N1cRef &ref, task_t task, uint64_t hostVa, uin
         taken = true;                                             // md and pages now belong to the BO record
         if (mapped) {
             s->maps[slot] = VaEnt{ c.gpuStripped, size, 0, h, (uint32_t)flags };
-            amdgpu_hdp_flush(*gCtx->dev);
-            const uint32_t f = flush_vmid(s->vmid);               // synchronous: the mapping is complete on return
-            if (f != kOk) rc = (IOReturn)f;                        // a hang was latched: the BO stays recorded (leaked at close)
+            if (!amdgpu_hdp_flush(*gCtx->dev)) {
+                rc = kIOReturnNotReady;   // keep BO + map record: PTE visibility is uncertain, so backing must remain owned
+            } else {
+                const uint32_t f = flush_vmid(s->vmid);           // synchronous: the mapping is complete on return
+                if (f != kOk) rc = (IOReturn)f;                    // the BO and map record remain for safe leak/quarantine
+            }                        // a hang was latched: the BO stays recorded (leaked at close)
         }
         out[0] = h; out[1] = size; out[2] = mapped ? va_canonicalize(c.gpuStripped) : 0ull; out[3] = N48N_PLACED_HOST_IMPORT;
     } while (false);
@@ -1465,9 +1483,12 @@ IOReturn n1c_gem_va(const N1cRef &ref, const n48n_gem_va *in) {
             IOLockUnlock(gCliLock);
             if (r != kOk) { rc = (IOReturn)r; break; }
             s->maps[slot] = VaEnt{ q.stripped, in->map_size, in->offset_in_bo, in->handle, in->flags };
-            amdgpu_hdp_flush(*gCtx->dev);
-            const uint32_t f = flush_vmid(s->vmid);      // synchronous: the mapping is complete on return
-            if (f != kOk) rc = (IOReturn)f;
+            if (!amdgpu_hdp_flush(*gCtx->dev)) {
+                rc = kIOReturnNotReady;   // keep map record + BO backing; PTE visibility is uncertain
+            } else {
+                const uint32_t f = flush_vmid(s->vmid); // synchronous: the mapping is complete on return
+                if (f != kOk) rc = (IOReturn)f;          // retain the map record so BoFree cannot recycle backing
+            }
         } else {
             const int hit = va_find_exact(s->maps, kMaxMaps, in->handle, q.stripped, in->map_size);
             if (hit < 0) { rc = kIOReturnBadArgument; break; }
@@ -1477,10 +1498,13 @@ IOReturn n1c_gem_va(const N1cRef &ref, const n48n_gem_va *in) {
                 break;
             }
             pt_unmap(s->rootPa, q.stripped, in->map_size / kPage, mem);
-            s->maps[hit] = VaEnt{ 0, 0, 0, 0, 0 };
-            amdgpu_hdp_flush(*gCtx->dev);
-            const uint32_t f = flush_vmid(s->vmid);
-            if (f != kOk) rc = (IOReturn)f;
+            if (!amdgpu_hdp_flush(*gCtx->dev)) {
+                rc = kIOReturnNotReady;   // retain the software map record and BO backing for a later safe retry/leak
+            } else {
+                const uint32_t f = flush_vmid(s->vmid);
+                if (f != kOk) rc = (IOReturn)f;
+                else s->maps[hit] = VaEnt{ 0, 0, 0, 0, 0 };
+            }
         }
     } while (false);
     sess_unlock(s);
