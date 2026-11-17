@@ -98,6 +98,9 @@ static void test_atomic_bump_reservations(void)
     uint64_t unused = 0;
     assert(!gart_atomic_bump_reserve(&next, kTotal, kSpan, &unused));
     assert(!gart_atomic_bump_reserve(&next, kTotal, 0, &unused));
+    uint64_t misaligned_next = 1;
+    assert(!gart_atomic_bump_reserve(&misaligned_next, kTotal, kSpan, &unused));
+    assert(!gart_atomic_bump_reserve(&next, kTotal, 1024, &unused));
     assert(!gart_atomic_bump_reserve(nullptr, kTotal, kSpan, &unused));
     assert(!gart_atomic_bump_reserve(&next, kTotal, kSpan, nullptr));
 }
