@@ -2,7 +2,7 @@ CXX ?= c++
 CXXFLAGS ?= -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
 TSANFLAGS ?= -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=thread -fno-omit-frame-pointer
 
-.PHONY: test clean
+.PHONY: test test-tsan clean
 
 test: build/test_gart_range_allocator build/test_gart_mapping_lifecycle build/test_gart_range_bounds build/test_amdgpu_vram_allocator
 	./build/test_gart_range_allocator
