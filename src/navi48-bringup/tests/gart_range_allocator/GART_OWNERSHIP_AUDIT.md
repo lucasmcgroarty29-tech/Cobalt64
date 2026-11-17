@@ -174,7 +174,7 @@ Until those answers are established, do not implement a generic gmc_unbind() or 
 
 ## Lifecycle model update
 
-The host-side lifecycle gate now separates writing cleared PTEs, completing the HDP flush, and acknowledging TLB invalidation on every required translation hub. Its tests reject invalidation before the HDP flush, completion before all required context bits are acknowledged, unknown hub bits, skipped steps, and reuse after quarantine. This remains a contract model only: it cannot establish which hubs or VMIDs a real allocation actually requires, and it does not issue or verify hardware operations.
+The host-side lifecycle gate now separates writing cleared PTEs, completing the HDP flush, and acknowledging TLB invalidation for every required hub/VMID context. Its tests reject invalidation before the HDP flush, completion before all required context bits are acknowledged, unknown context bits, skipped steps, and reuse after quarantine. This remains a contract model only: it cannot establish which hubs or VMIDs a real allocation actually requires, and it does not issue or verify hardware operations.
 
 ## Fail-closed TLB acknowledgement changes
 
