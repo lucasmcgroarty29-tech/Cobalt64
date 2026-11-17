@@ -1625,8 +1625,7 @@ bool navi48_doorbell_dword_ptr(uint32_t index, void **ptrOut, uint64_t *byteOffO
 bool navi48_hdp_flush_now(void) {
 	if (!gBringup.dev) return false;
 	amdgpu::sysmem_wmb();
-	amdgpu::amdgpu_hdp_flush(*gBringup.dev);
-	return true;
+	return amdgpu::amdgpu_hdp_flush(*gBringup.dev);
 }
 
 // Clear-state buffer for TTL slot 13 (queryCSBInfo). Apple's AMDHardware::initHWInfo
@@ -1673,7 +1672,10 @@ bool navi48_csb_publish(uint64_t *mcOut, uint32_t *sizeOut) {
 		volatile uint32_t *d = static_cast<volatile uint32_t *>(gCsbMem.cpu);
 		for (uint32_t i = 0; i < 1024; i++) d[i] = 0xffff1000u;   // 1-dword NOP padding, whole page
 		amdgpu::sysmem_wmb();
-		amdgpu::amdgpu_hdp_flush(*gBringup.dev);
+		if (!amdgpu::amdgpu_hdp_flush(*gBringup.dev)) {
+			N48LOG("csb: HDP flush window unavailable - refusing to publish clear-state buffer");
+			return false;
+		}
 		gCsbPublished = true;
 		N48LOG("csb: published a 16-dword NOP IB at GART MC %#llx (cpu %p, page of 0xffff1000) - "
 		       "expect Apple's clear-state INDIRECT_BUFFER dw1/dw2 = that address and dw3 = 0x80000010",
@@ -1835,7 +1837,10 @@ bool navi48_gfx_takeover(Navi48GfxTakeover &t) {
 	// (2) HDP flush. Apple's own flush after it writes an MQD or a ring through
 	//     the BAR is the blocked 0xe17<-1 / 0xe08<-0 pair, so nothing Apple put
 	//     in memory has been flushed. Do it for them before the GPU reads it.
-	(void)navi48_hdp_flush_now();
+	if (!navi48_hdp_flush_now()) {
+		N48LOG("gfx-takeover: HDP flush window unavailable - refusing queue handoff");
+		return false;
+	}
 
 	// (3) REMOVE our KGQ. It owns GFX pipe0/queue0 and doorbell index
 	//     cp.doorbell_index, which is exactly what we are about to give away.
