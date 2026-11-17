@@ -1480,22 +1480,29 @@ bool navi48_gart_bind_at(uint64_t gartAddr, uint64_t busAddr, uint64_t sizeBytes
 // indexed by (gartAddr - gart_start) / 4096. Reads go through the same BAR0
 // aperture the write path uses. This reads only; it maps nothing.
 bool navi48_gart_read_pte(uint64_t gartAddr, uint64_t &pteOut) {
-	if (!gBringup.gfxhubReady || !gBringup.dev) return false;
-	const auto &gmc = gBringup.gmc;
-	if (gmc.gart_pt_bus == 0 || gmc.gart_size == 0)  return false;
-	const uint64_t start = gmc.gart_start;
-	if (gartAddr < start || gartAddr >= start + gmc.gart_size) return false;
+    if (!gBringup.gfxhubReady || !gBringup.dev) return false;
+    const auto &gmc = gBringup.gmc;
+    if (gmc.gart_pt_bus == 0 || gmc.gart_pt_size == 0 || gmc.gart_size == 0)
+        return false;
 
-	const uint64_t idx = (gartAddr - start) / 4096ULL;
-	const uint64_t off = gmc.gart_pt_vram_offset + idx * 8ULL;
-	const auto &dev = *gBringup.dev;
-	if (!dev.bar0 || off + 8 > dev.bar0Size) return false;
+    const uint64_t start = gmc.gart_start;
+    if (gartAddr < start) return false;
+    const uint64_t gartOffset = gartAddr - start;
+    if (gartOffset >= gmc.gart_size) return false;
 
-	const volatile uint32_t *p =
-	    reinterpret_cast<const volatile uint32_t *>(dev.bar0 + off);
-	const uint32_t lo = p[0], hi = p[1];
-	pteOut = ((uint64_t)hi << 32) | lo;
-	return true;
+    const uint64_t idx = gartOffset / 4096ULL;
+    uint64_t off = 0;
+    if (!gart_checked_pte_vram_range(gmc.gart_pt_vram_offset,
+                                     gmc.gart_pt_size, idx, 1, &off))
+        return false;
+    const auto &dev = *gBringup.dev;
+    if (!dev.bar0 || !amdgpu_range_fits(dev.bar0Size, off, 8)) return false;
+
+    const volatile uint32_t *p =
+        reinterpret_cast<const volatile uint32_t *>(dev.bar0 + off);
+    const uint32_t lo = p[0], hi = p[1];
+    pteOut = ((uint64_t)hi << 32) | lo;
+    return true;
 }
 
 // Point SDMA1 QUEUE1 at a ring somebody else owns.
@@ -1524,23 +1531,32 @@ bool navi48_gart_read_pte(uint64_t gartAddr, uint64_t &pteOut) {
 // 0.0.212: the cap was 8192 bytes, below Apple's 2240-dword page-map IB (8960 bytes). The loop
 // resolves and residency-checks every page on its own, so the length bound only has to cover the SDMA IB cap.
 bool navi48_gart_read_range(uint64_t gartAddr, void *dst, uint32_t len) {
-	if (!dst || len == 0 || len > 65536) return false;
-	uint8_t *out = static_cast<uint8_t *>(dst);
-	uint32_t done = 0;
-	while (done < len) {
-		const uint64_t a   = gartAddr + done;
-		const uint32_t off = (uint32_t)(a & 0xFFF);
-		uint32_t chunk     = 4096u - off;
-		if (chunk > len - done) chunk = len - done;
-		if (!navi48_gart_read_page(a, out + done, chunk)) {
-			N48LOG("gart-read-range: page %#llx of range %#llx+%u failed",
-			       (unsigned long long)(a & ~0xFFFULL),
-			       (unsigned long long)gartAddr, len);
-			return false;
-		}
-		done += chunk;
-	}
-	return true;
+    if (!dst || len == 0 || len > 65536 || !gBringup.gmc.inited) return false;
+    const auto &gmc = gBringup.gmc;
+    if (gartAddr < gmc.gart_start) return false;
+    const uint64_t offset = gartAddr - gmc.gart_start;
+    uint64_t endAddress = 0;
+    if (!amdgpu_range_fits(gmc.gart_size, offset, len) ||
+        !gart_checked_add_u64(gartAddr, len, &endAddress))
+        return false;
+    (void)endAddress;
+
+    uint8_t *out = static_cast<uint8_t *>(dst);
+    uint32_t done = 0;
+    while (done < len) {
+        const uint64_t a = gartAddr + done;
+        const uint32_t off = (uint32_t)(a & 0xFFF);
+        uint32_t chunk = 4096u - off;
+        if (chunk > len - done) chunk = len - done;
+        if (!navi48_gart_read_page(a, out + done, chunk)) {
+            N48LOG("gart-read-range: page %#llx of range %#llx+%u failed",
+                   (unsigned long long)(a & ~0xFFFULL),
+                   (unsigned long long)gartAddr, len);
+            return false;
+        }
+        done += chunk;
+    }
+    return true;
 }
 
 // ---- 0.0.178 "gfxmap" ----------------------------------------------------
@@ -6003,24 +6019,33 @@ bool navi48_sdma_srbm_probe(uint32_t reg, uint32_t sentinelA, uint32_t sentinelB
 // residency refusal.
 
 bool navi48_gart_write_range(uint64_t gartAddr, const void *src, uint32_t len) {
-	if (!src || len == 0 || len > 65536) return false;
-	const uint8_t *in = static_cast<const uint8_t *>(src);
-	uint32_t done = 0;
-	while (done < len) {
-		const uint64_t a   = gartAddr + done;
-		const uint32_t off = (uint32_t)(a & 0xFFF);
-		uint32_t chunk     = 4096u - off;
-		if (chunk > len - done) chunk = len - done;
-		if (!navi48_gart_write_page(a, in + done, chunk)) {
-			N48LOG("gart-write-range: page %#llx of range %#llx+%u FAILED — the "
-			       "range may now be PARTIALLY written",
-			       (unsigned long long)(a & ~0xFFFULL),
-			       (unsigned long long)gartAddr, len);
-			return false;
-		}
-		done += chunk;
-	}
-	return true;
+    if (!src || len == 0 || len > 65536 || !gBringup.gmc.inited) return false;
+    const auto &gmc = gBringup.gmc;
+    if (gartAddr < gmc.gart_start) return false;
+    const uint64_t offset = gartAddr - gmc.gart_start;
+    uint64_t endAddress = 0;
+    if (!amdgpu_range_fits(gmc.gart_size, offset, len) ||
+        !gart_checked_add_u64(gartAddr, len, &endAddress))
+        return false;
+    (void)endAddress;
+
+    const uint8_t *in = static_cast<const uint8_t *>(src);
+    uint32_t done = 0;
+    while (done < len) {
+        const uint64_t a = gartAddr + done;
+        const uint32_t off = (uint32_t)(a & 0xFFF);
+        uint32_t chunk = 4096u - off;
+        if (chunk > len - done) chunk = len - done;
+        if (!navi48_gart_write_page(a, in + done, chunk)) {
+            N48LOG("gart-write-range: page %#llx of range %#llx+%u FAILED — the "
+                   "range may now be PARTIALLY written",
+                   (unsigned long long)(a & ~0xFFFULL),
+                   (unsigned long long)gartAddr, len);
+            return false;
+        }
+        done += chunk;
+    }
+    return true;
 }
 
 // Kick the EXTERNAL (QUEUE1) doorbell with a wptr Apple owns.
