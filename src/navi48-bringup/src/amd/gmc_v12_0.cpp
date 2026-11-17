@@ -1903,16 +1903,14 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
                 (unsigned long long)gmc.gart_size);
         return kIOReturnBadArgument;
     }
-    if (gmc.gart_bump_start > gmc.gart_bump_offset ||
-        gmc.gart_bump_offset > gmc.gart_size)
-        return kIOReturnNotReady;
-
     // In HIGH mode the entire [bump_start, gart_size) aperture is reserved
     // for this driver's bump allocator, even before its first allocation.
     // In legacy LOW mode, only the already-consumed [0, bump_offset) interval
     // is protected, preserving the documented Apple-page contention behaviour.
-    const uint64_t reservedEnd = gmc.gart_bump_start != 0
-        ? gmc.gart_size : gmc.gart_bump_offset;
+    uint64_t reservedEnd = 0;
+    if (!gart_checked_bump_reserved_end(gmc.gart_size, gmc.gart_bump_start,
+                                        gmc.gart_bump_offset, &reservedEnd))
+        return kIOReturnNotReady;
     const uint64_t reservedSize = reservedEnd - gmc.gart_bump_start;
     if (gart_ranges_overlap(gmc.gart_size, gartOffset, rounded,
                            gmc.gart_bump_start, reservedSize)) {
