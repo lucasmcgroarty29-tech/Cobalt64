@@ -1147,7 +1147,7 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
              SDMASRBMTargetResult &tr, uint32_t leg,
              bool via_ib, bool linux_enc, bool apple_ibhdr,
              uint32_t clear, uint64_t ib_gpu_va, uint64_t ib_vram_off,
-             const char *tag)
+             const char *tag, bool *ibStagingUncertain)
 {
     if (leg >= 5) return false;
     tr.tried[leg] = true;
@@ -1181,7 +1181,12 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
             const uint32_t d = (i < 3) ? srbm[i] : SDMA_PKT_HEADER_OP(SDMA_OP_NOP);
             WBAR0_32(dev, ib_vram_off + i * 4u, d);
         }
-        amdgpu_hdp_flush(dev);
+        if (!amdgpu_hdp_flush(dev)) {
+            if (ibStagingUncertain) *ibStagingUncertain = true;
+            SDMA_LOG("srbm-test: %s %s — IB staging HDP flush unavailable; IB allocation must remain quarantined",
+                     tag, srbm_leg_name(leg));
+            return false;
+        }
         // sdma_v7_0_ring_emit_ib:283 — insert_nop((2 - wptr) & 7) so the dword
         // AFTER the 6-dword IB packet lands on an 8-dword boundary.
         const uint32_t nops = (2u - static_cast<uint32_t>(inst.wptr)) & 7u;
@@ -1258,7 +1263,8 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
 static void
 srbm_run_target(const DeviceContext &dev, SDMAInstance &inst,
                 SDMASRBMTargetResult &tr, uint32_t clear,
-                uint64_t ib_gpu_va, uint64_t ib_vram_off, const char *tag)
+                uint64_t ib_gpu_va, uint64_t ib_vram_off, const char *tag,
+                bool *ibStagingUncertain)
 {
     tr.before = RREG32(dev, tr.reg_dw);
     // Is the register MMIO-writable at all? Without this a dead register would
@@ -1270,29 +1276,31 @@ srbm_run_target(const DeviceContext &dev, SDMAInstance &inst,
              "%s", tag, tr.reg_dw, tr.before, tr.value,
              tr.mmio_ok ? "READS BACK (the instrument is sound)"
                         : "DOES NOT read back — every leg below would be VOID");
-    if (!tr.mmio_ok) return;
+    if (!tr.mmio_ok || (ibStagingUncertain && *ibStagingUncertain)) return;
 
     // Ring, Apple form; the Linux form only if the Apple one did not land, so
     // the alternate encoding's stray write never happens needlessly.
     (void)srbm_run_leg(dev, inst, tr, 0, false, false, true, clear,
-                       ib_gpu_va, ib_vram_off, tag);
-    if (!tr.landed[0])
+                       ib_gpu_va, ib_vram_off, tag, ibStagingUncertain);
+    if (!tr.landed[0] && !(ibStagingUncertain && *ibStagingUncertain))
         (void)srbm_run_leg(dev, inst, tr, 1, false, true, true, clear,
-                           ib_gpu_va, ib_vram_off, tag);
+                           ib_gpu_va, ib_vram_off, tag, ibStagingUncertain);
 
     // Same two through an INDIRECT_BUFFER carrying Apple's header.
-    (void)srbm_run_leg(dev, inst, tr, 2, true, false, true, clear,
-                       ib_gpu_va, ib_vram_off, tag);
-    if (!tr.landed[2])
+    if (!(ibStagingUncertain && *ibStagingUncertain))
+        (void)srbm_run_leg(dev, inst, tr, 2, true, false, true, clear,
+                           ib_gpu_va, ib_vram_off, tag, ibStagingUncertain);
+    if (!tr.landed[2] && !(ibStagingUncertain && *ibStagingUncertain))
         (void)srbm_run_leg(dev, inst, tr, 3, true, true, true, clear,
-                           ib_gpu_va, ib_vram_off, tag);
+                           ib_gpu_va, ib_vram_off, tag, ibStagingUncertain);
 
     // Only when the ring worked and neither IB leg did is bit 31 of the IB
     // header worth a leg of its own: rerun the WINNING operand form with the
     // plain Linux header, so one dword is the only difference.
-    if ((tr.landed[0] || tr.landed[1]) && !tr.landed[2] && !tr.landed[3])
+    if (!(ibStagingUncertain && *ibStagingUncertain) &&
+        (tr.landed[0] || tr.landed[1]) && !tr.landed[2] && !tr.landed[3])
         (void)srbm_run_leg(dev, inst, tr, 4, true, tr.landed[1], false, clear,
-                           ib_gpu_va, ib_vram_off, tag);
+                           ib_gpu_va, ib_vram_off, tag, ibStagingUncertain);
 
     WREG32(dev, tr.reg_dw, tr.before);
 }
@@ -1335,7 +1343,13 @@ sdma_srbm_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
         return kIOReturnNoMemory;
     }
     bar0_memset_vram(dev, ib_off, 0, 4096);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        SDMA_LOG("srbm-test: initial IB clear flush unavailable; IB %#llx retained",
+                 (unsigned long long)ib.gpu_va);
+        t.ib_gpu_va = ib.gpu_va;
+        if (out) *out = t;
+        return kIOReturnNotReady;
+    }
 
     t.ran          = true;
     t.ib_gpu_va    = ib.gpu_va;
@@ -1358,10 +1372,19 @@ sdma_srbm_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
              t.scratch.reg_dw >> 2, t.ctx2.reg_dw >> 2,
              t.scratch.reg_dw << 2, t.ctx2.reg_dw << 2);
 
+    bool ibStagingUncertain = false;
     srbm_run_target(dev, inst, t.scratch, kSRBMScratchClear,
-                    ib.gpu_va, ib_off, "scratch(SCRATCH_REG7)");
-    srbm_run_target(dev, inst, t.ctx2, 0u,
-                    ib.gpu_va, ib_off, "ctx2(GCVM_CONTEXT2 PT base LO)");
+                    ib.gpu_va, ib_off, "scratch(SCRATCH_REG7)", &ibStagingUncertain);
+    if (!ibStagingUncertain)
+        srbm_run_target(dev, inst, t.ctx2, 0u,
+                        ib.gpu_va, ib_off, "ctx2(GCVM_CONTEXT2 PT base LO)",
+                        &ibStagingUncertain);
+    if (ibStagingUncertain) {
+        SDMA_LOG("srbm-test: IB staging visibility uncertain; retaining IB allocation %#llx",
+                 (unsigned long long)ib.gpu_va);
+        if (out) *out = t;
+        return kIOReturnNotReady;
+    }
 
     gmc.vram_alloc.free(ib);
 
@@ -1764,7 +1787,10 @@ sdma_ib_copy_linear_test(const DeviceContext &dev, SDMAInstance &inst,
     ibd[7] = 0;   // CPV byte
     for (uint32_t i = 0; i < kIbDwords; i++)
         WBAR0_32(dev, ib_vram_off + i * 4u, ibd[i]);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        SDMA_LOG("ib-copy: HDP flush unavailable after IB staging; refusing submission");
+        return kIOReturnNotReady;
+    }
 
     const uint64_t fence_gpu   = inst.wb_bus + kSDMAWBFenceOffset;
     const uint32_t fence_value = 0x5C000000u | (tag & 0xFFFFu);
@@ -1994,7 +2020,14 @@ sdma_vram_copy_test(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                  0xCAFE0000u + i);
     }
     bar0_memset_vram(dev, dst_vram_off, 0xDEADBEEFu, bytes);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        res.kr = kIOReturnNotReady; res.bytes = bytes; res.dwords = n_dwords;
+        res.src_gpu_va = src.gpu_va; res.dst_gpu_va = dst.gpu_va;
+        if (out) *out = res;
+        SDMA_LOG("vram_copy_test: initial staging flush unavailable; src %#llx and dst %#llx retained",
+                 (unsigned long long)src.gpu_va, (unsigned long long)dst.gpu_va);
+        return kIOReturnNotReady;
+    }
 
     SDMA_LOG("vram_copy_test: SDMA%u bytes=%u src.gpu_va=%#llx "
              "(vram_off=%#llx) dst.gpu_va=%#llx (vram_off=%#llx)",
