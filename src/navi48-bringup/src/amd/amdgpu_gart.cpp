@@ -45,6 +45,7 @@
 
 #include "amdgpu_gart.h"
 #include "amdgpu_gmc.h"
+#include "gart_range_bounds.h"
 #include "amdgpu_log.h"
 
 namespace amdgpu {
@@ -145,46 +146,39 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
         return kIOReturnNotReady;
     }
     if (alignment < kAMDGPUGPUPageSize) alignment = kAMDGPUGPUPageSize;
-    // Round size up to a GPU page boundary so we map whole PTEs.
-    uint64_t roundedSize = (sizeBytes + kAMDGPUGPUPageSize - 1) &
-                           ~((uint64_t)kAMDGPUGPUPageSize - 1);
-    uint32_t numPTEs = (uint32_t)(roundedSize / kAMDGPUGPUPageSize);
-    if (gart.nextFreeOffset + roundedSize > gart.gartSize) {
-        GART_LOG("bind: out of GART space (need %llu, free %llu)",
-                 (unsigned long long)roundedSize,
-                 (unsigned long long)(gart.gartSize - gart.nextFreeOffset));
-        return kIOReturnNoSpace;
-    }
 
-    // Allocate the system-memory buffer (replaces the reference's
-    // IOBufferMemoryDescriptor::Create + IODMACommand::PrepareForDMA).
+    uint64_t roundedSize = 0;
+    uint32_t numPTEs = 0;
+    if (!gart_checked_page_span(sizeBytes, &roundedSize, &numPTEs))
+        return kIOReturnBadArgument;
+    const uint64_t gartOff = gart.nextFreeOffset;
+    const uint64_t pteStartIndex = gartOff / kAMDGPUGPUPageSize;
+    uint64_t gartMCAddr = 0;
+    if (!gart_checked_range(gart.gartSize, gartOff, roundedSize))
+        return kIOReturnNoSpace;
+    if (!gart_checked_pte_range(gart.pageTableSize, pteStartIndex, numPTEs) ||
+        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
+        return kIOReturnBadArgument;
+
     SysMem m {};
     kern_return_t ret = sysmem_alloc(m, roundedSize, alignment);
     if (ret != kIOReturnSuccess || !m.valid()) {
         GART_LOG("bind: sysmem_alloc failed: %#x", ret);
         return ret != kIOReturnSuccess ? ret : kIOReturnNoMemory;
     }
-
-    // Write PTEs into the VRAM page table.
-    //
-    // Each PTE is 8 bytes: high bits = host physical address, low bits =
-    // flags. PTEFlags::SYSMEM_RW = VALID|SYSTEM|SNOOPED|EXEC|R|W plus
-    // IS_PTE (bit 63, mandatory on GFX12) and MTYPE_GFX12_UC.
-    uint64_t gartOff = gart.nextFreeOffset;
-    uint64_t pteStartIndex = gartOff / kAMDGPUGPUPageSize;
-    for (uint32_t i = 0; i < numPTEs; i++) {
-        uint64_t physAddr = m.bus + (uint64_t)i * kAMDGPUGPUPageSize;
-        uint64_t pte = (physAddr & ~((uint64_t)0xFFFULL)) |
-                       PTEFlags::SYSMEM_RW;
-        uint64_t pteOffsetInPT = (pteStartIndex + i) * 8ULL;
-        bar0_memcpy_to_vram(dev,
-                            gart.pageTableVRAMOffset + pteOffsetInPT,
-                            &pte, sizeof(pte));
+    if (!gart_checked_bus_span(m.bus, roundedSize)) {
+        sysmem_free(m);
+        return kIOReturnBadArgument;
     }
 
-    // HDP flush after writing PTEs so GMC sees the new entries before
-    // any GART access. Mirrors upstream amdgpu_gart_invalidate_tlb's
-    // amdgpu_device_flush_hdp call.
+    for (uint32_t i = 0; i < numPTEs; i++) {
+        const uint64_t physAddr = m.bus + (uint64_t)i * kAMDGPUGPUPageSize;
+        const uint64_t pte = (physAddr & ~((uint64_t)0xFFFULL)) |
+                             PTEFlags::SYSMEM_RW;
+        const uint64_t pteOffsetInPT = (pteStartIndex + i) * 8ULL;
+        bar0_memcpy_to_vram(dev, gart.pageTableVRAMOffset + pteOffsetInPT,
+                            &pte, sizeof(pte));
+    }
     amdgpu_hdp_flush(dev);
 
     outBinding->sysmem      = m;
@@ -192,10 +186,9 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
     outBinding->cpuAddr     = m.cpu;
     outBinding->sizeBytes   = roundedSize;
     outBinding->gartOffset  = gartOff;
-    outBinding->gartMCAddr  = gart.gartStart + gartOff;
+    outBinding->gartMCAddr  = gartMCAddr;
     outBinding->numGPUPages = numPTEs;
-
-    gart.nextFreeOffset += roundedSize;
+    gart.nextFreeOffset = gartOff + roundedSize;
 
     GART_LOG("bind: %llu bytes @ bus=%#llx -> gart_mc=%#llx "
              "(%u PTEs at PT idx %llu)",
@@ -220,7 +213,7 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
                    uint64_t busAddr, uint64_t sizeBytes,
                    GARTBinding *binding)
 {
-    if (binding == nullptr) return kIOReturnBadArgument;
+    if (binding == nullptr || busAddr == 0) return kIOReturnBadArgument;
     if (gart.numPTEs == 0) {
         GART_LOG("bind_existing: GART not initialised");
         return kIOReturnNotReady;
@@ -230,43 +223,43 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
                  (unsigned long long)busAddr);
         return kIOReturnNotAligned;
     }
-    uint64_t rounded = (sizeBytes + kAMDGPUGPUPageSize - 1) &
-                       ~((uint64_t)kAMDGPUGPUPageSize - 1);
-    uint32_t numPTEs = (uint32_t)(rounded / kAMDGPUGPUPageSize);
 
-    // Choose the GART slot: reuse if the binding already has one, else bump.
-    uint64_t gartOff;
-    if (binding->gartMCAddr != 0 && binding->numGPUPages >= numPTEs) {
-        gartOff = binding->gartOffset;
-    } else {
-        if (gart.nextFreeOffset + rounded > gart.gartSize) {
-            GART_LOG("bind_existing: out of GART (need %llu, free %llu)",
-                     (unsigned long long)rounded,
-                     (unsigned long long)(gart.gartSize - gart.nextFreeOffset));
-            return kIOReturnNoSpace;
-        }
-        gartOff = gart.nextFreeOffset;
-        gart.nextFreeOffset += rounded;
-    }
+    uint64_t rounded = 0;
+    uint32_t numPTEs = 0;
+    if (!gart_checked_page_span(sizeBytes, &rounded, &numPTEs) ||
+        !gart_checked_bus_span(busAddr, rounded))
+        return kIOReturnBadArgument;
 
-    uint64_t pteStartIndex = gartOff / kAMDGPUGPUPageSize;
+    const bool reuse = binding->gartMCAddr != 0 &&
+                       binding->numGPUPages >= numPTEs;
+    const uint64_t gartOff = reuse ? binding->gartOffset : gart.nextFreeOffset;
+    if ((gartOff & (kAMDGPUGPUPageSize - 1)) != 0 ||
+        !gart_checked_range(gart.gartSize, gartOff, rounded))
+        return reuse ? kIOReturnBadArgument : kIOReturnNoSpace;
+
+    const uint64_t pteStartIndex = gartOff / kAMDGPUGPUPageSize;
+    uint64_t gartMCAddr = 0;
+    if (!gart_checked_pte_range(gart.pageTableSize, pteStartIndex, numPTEs) ||
+        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
+        return kIOReturnBadArgument;
+
+    if (!reuse) gart.nextFreeOffset = gartOff + rounded;
     for (uint32_t i = 0; i < numPTEs; i++) {
-        uint64_t physAddr = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
-        uint64_t pte = (physAddr & ~((uint64_t)0xFFFULL)) |
-                       PTEFlags::SYSMEM_RW;
-        uint64_t pteOffsetInPT = (pteStartIndex + i) * 8ULL;
-        bar0_memcpy_to_vram(dev,
-                            gart.pageTableVRAMOffset + pteOffsetInPT,
+        const uint64_t physAddr = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
+        const uint64_t pte = (physAddr & ~((uint64_t)0xFFFULL)) |
+                             PTEFlags::SYSMEM_RW;
+        const uint64_t pteOffsetInPT = (pteStartIndex + i) * 8ULL;
+        bar0_memcpy_to_vram(dev, gart.pageTableVRAMOffset + pteOffsetInPT,
                             &pte, sizeof(pte));
     }
     amdgpu_hdp_flush(dev);
 
-    binding->sysmem      = SysMem{};   // caller owns the memory
+    binding->sysmem      = SysMem{};
     binding->busAddr     = busAddr;
-    binding->cpuAddr     = nullptr;    // caller has the CPU pointer
+    binding->cpuAddr     = nullptr;
     binding->sizeBytes   = rounded;
     binding->gartOffset  = gartOff;
-    binding->gartMCAddr  = gart.gartStart + gartOff;
+    binding->gartMCAddr  = gartMCAddr;
     binding->numGPUPages = numPTEs;
 
     GART_LOG("bind_existing: %llu bytes @ bus=%#llx -> gart_mc=%#llx "
