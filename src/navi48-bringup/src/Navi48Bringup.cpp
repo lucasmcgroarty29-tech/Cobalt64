@@ -2497,7 +2497,10 @@ static uint32_t scanout_sdma_copies(amdgpu::DeviceContext &dev, amdgpu::SDMAInst
 	pkt[k++] = static_cast<uint32_t>(fenceMc);
 	pkt[k++] = static_cast<uint32_t>(fenceMc >> 32);
 	pkt[k++] = fenceValue;
-	amdgpu::amdgpu_hdp_flush(dev);   // rule 39: the engine reads VRAM the CPU just wrote
+	if (!amdgpu::amdgpu_hdp_flush(dev)) {
+		IOFree(pkt, dwords * sizeof(uint32_t));
+		return kScanStRing;
+	}
 	const uint32_t wrote = amdgpu::sdma_ring_write(dev, inst, pkt, k);
 	IOFree(pkt, dwords * sizeof(uint32_t));
 	if (wrote != k) return kScanStRing;
@@ -2683,7 +2686,7 @@ static uint32_t fc_kick(void *vc, uint64_t srcMc, uint64_t dstMc, uint32_t bytes
 	const uint32_t k = n48_fc_build_packet(pkt, N48_FC_PKT_DWORDS, srcMc, dstMc, bytes, inst.wb_bus + N48_FC_WB_FENCE_OFF, fence);
 	if (k != N48_FC_PKT_DWORDS) return N48_FC_SUB_REFUSED;
 	amdgpu::sysmem_wmb();            // the staged bytes are in memory before the engine is told to read them (snooped GART)
-	amdgpu::amdgpu_hdp_flush(dev);   // as scanout_sdma_copies
+	if (!amdgpu::amdgpu_hdp_flush(dev)) return N48_FC_SUB_REFUSED;
 	if (amdgpu::sdma_ring_write(dev, inst, pkt, k) != k) return N48_FC_SUB_RING;
 	if (amdgpu::sdma_kick_doorbell(dev, inst) != kIOReturnSuccess) return N48_FC_SUB_RING;
 	return 0u;
@@ -2869,7 +2872,11 @@ static uint32_t fc_positive_control() {
 		return 3u;
 	}
 	for (uint32_t i = 0; i < N48_FC_STAGING_BYTES; i += 4u) amdgpu::WBAR0_32(dev, off + i, 0xdeadbeefu);   // our scratch only
-	amdgpu::amdgpu_hdp_flush(dev);
+	if (!amdgpu::amdgpu_hdp_flush(dev)) {
+		IOLockLock(gScanoutLock); gBringup.gmc.vram_alloc.free(a); IOLockUnlock(gScanoutLock);
+		N48LOG("fastcopy63: CONTROL refused - HDP flush window unavailable");
+		return 5u;
+	}
 	FcSub sc {}; sc.dAt = off; sc.pcLo = off; sc.pcHi = off + N48_FC_STAGING_BYTES; sc.fill = &fc_pc_fill; sc.fillCtx = nullptr;
 	const n48_fc_ops ops { &sc, &fc_fill, &fc_submit };
 	uint32_t *exp = static_cast<uint32_t *>(IOMalloc(N48_FC_STAGING_BYTES));
@@ -3074,7 +3081,12 @@ static uint32_t fc89_control() {
 	gFc89.pc_nonce = nonce; gFc89PcOff = off;
 	uint64_t t0 = 0; clock_get_uptime(&t0);
 	for (uint32_t i = 0; i < N48_FC_STAGING_BYTES; i += 4u) amdgpu::WBAR0_32(dev, off + i, n48_fc89_pc_word(i / 4u, nonce));   // our scratch only
-	amdgpu::amdgpu_hdp_flush(dev);   // as 63's control: the BAR0 pattern is in VRAM before the engine reads it
+	if (!amdgpu::amdgpu_hdp_flush(dev)) {
+		gFc89.pc_done = 0u; gFc89PcOff = prevOff;
+		IOLockLock(gScanoutLock); gBringup.gmc.vram_alloc.free(a); IOLockUnlock(gScanoutLock);
+		N48LOG("fastcopy89: CONTROL refused - HDP flush window unavailable");
+		return 7u;
+	}
 	uint32_t *rb = static_cast<uint32_t *>(gFc89Rb.cpu);
 	for (uint32_t i = 0; i < N48_FC_STAGING_BYTES / 4u; i++) rb[i] = ~n48_fc89_pc_word(i, nonce);
 	FcSub sc {}; sc.dAt = off;
@@ -3556,7 +3568,7 @@ static uint32_t scanout_sdma_tiled_copy(amdgpu::DeviceContext &dev, amdgpu::SDMA
 	pkt[k++] = static_cast<uint32_t>(fenceMc >> 32);
 	pkt[k++] = fenceValue;
 	if (k != dwords) return kScanStRing;
-	amdgpu::amdgpu_hdp_flush(dev);
+	if (!amdgpu::amdgpu_hdp_flush(dev)) return kScanStRing;
 	if (amdgpu::sdma_ring_write(dev, inst, pkt, k) != k) return kScanStRing;
 	if (amdgpu::sdma_kick_doorbell(dev, inst) != kIOReturnSuccess) return kScanStRing;
 	uint64_t us = 0;
@@ -3601,7 +3613,7 @@ static uint32_t scanout_sdma_copy_linear_gcr(amdgpu::DeviceContext &dev, amdgpu:
 	pkt[k++] = static_cast<uint32_t>(fenceMc >> 32);
 	pkt[k++] = fenceValue;
 	if (k != dwords) return kScanStRing;
-	amdgpu::amdgpu_hdp_flush(dev);
+	if (!amdgpu::amdgpu_hdp_flush(dev)) return kScanStRing;
 	if (amdgpu::sdma_ring_write(dev, inst, pkt, k) != k) return kScanStRing;
 	if (amdgpu::sdma_kick_doorbell(dev, inst) != kIOReturnSuccess) return kScanStRing;
 	uint64_t us = 0;
