@@ -1927,8 +1927,7 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
     for (uint32_t i = 0; i < numPTEs; i++) {
         const uint64_t pa = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
         const uint64_t pte = (pa & ~((uint64_t)0xFFFULL)) | PTEFlags::SYSMEM_RW;
-        const uint64_t pteVRAMOffset = gmc.gart_pt_vram_offset +
-                                       (firstPTE + i) * 8ULL;
+        const uint64_t pteVRAMOffset = pteBaseOffset + (uint64_t)i * 8ULL;
         bar0_memcpy_to_vram(dev, pteVRAMOffset, &pte, sizeof(pte));
     }
     amdgpu_hdp_flush(dev);
