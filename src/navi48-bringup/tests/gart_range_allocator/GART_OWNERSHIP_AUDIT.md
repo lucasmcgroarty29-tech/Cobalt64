@@ -581,3 +581,10 @@ The G1 test-only setup now checks its VMID mapping flush before continuing, and 
 A follow-up review found that a failed new fence-target publication can write a PTE before the software `FenceSlot` record is committed. If the flush then fails, the window is marked poisoned but that slot is not present in the session's slot table. Close now treats a poisoned window as requiring full-window retirement: it clears every PTE in the 16-page window and requires HDP plus VMID-0 invalidation before releasing any BO backing. If that acknowledgement fails, backing remains quarantined and the slot stays permanently dead.
 
 This closes a software bookkeeping gap in the fail-closed path. It remains source-level reasoning pending native compilation and hardware validation.
+
+
+## GMC VMFrag and initialization HDP propagation (2026-11-17)
+
+The VMFrag diagnostic's per-leg source/destination staging now stops before TLB invalidation or SDMA submission if HDP cannot be issued. Its CONTEXT1 restore path treats an unavailable HDP flush exactly like a failed TLB acknowledgement and quarantines the temporary table/data allocations rather than freeing them under uncertain translations.
+
+GFXHUB GART initialization now propagates the HDP result and refuses to publish readiness before the VMID-0 TLB invalidation if the flush window is unavailable. The PDB0 self-test refuses its SDMA copy when its source staging flush fails, and the compute-ring self-test now propagates the checked GMC HDP status before submitting its IB.
