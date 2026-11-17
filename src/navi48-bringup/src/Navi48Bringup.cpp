@@ -11,6 +11,7 @@
 #include "amd/amdgpu_discovery.h"
 #include "amd/amdgpu_init.h"
 #include "amd/amdgpu_regs.h"
+#include "amd/gart_range_bounds.h"
 #include "amd/amdgpu_sdma.h"
 #include "Navi48MetalNub.hpp"   // 0.0.610: terminate a published Metal nub at stop
 #include "Navi48DisplayNub.hpp"       // 0.0.652 (M5): fbpublish 2
