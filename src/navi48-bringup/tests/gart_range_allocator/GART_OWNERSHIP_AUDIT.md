@@ -430,3 +430,21 @@ The allocator also refuses `init()` while live allocations remain, preventing a
 reset from orphaning issued BOs and making their VRAM available for reuse.
 Reset remains possible once all tracked allocations have been returned. This
 is covered by a host regression test.
+
+
+## PTE write aperture preflight
+
+The mapping APIs write page-table entries through the BAR0 VRAM aperture.
+Their page-table allocation bounds alone did not prove that the full PTE span
+was currently CPU-writable through the mapped BAR0 window. GMC bump, GMC
+exact-offset, and the legacy GART bind paths now preflight the complete PTE
+byte span against `dev.bar0` and `dev.bar0Size` before writing entries.
+This prevents the low-level void BAR0 copy helper from silently rejecting an
+out-of-aperture PTE write while the mapping API reports success. In the bump
+path, a failed preflight after interval reservation leaves the interval
+quarantined rather than attempting a potentially unsafe rollback.
+
+This remains a preflight against the CPU-visible BAR0 aperture, not a hardware
+write acknowledgement and not a GPU TLB invalidation. Mapping retirement,
+GPU-use fences, and post-publication visibility still require separate
+hardware-aware sequencing.
