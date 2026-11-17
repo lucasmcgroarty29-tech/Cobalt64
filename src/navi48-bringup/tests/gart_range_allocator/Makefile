@@ -1,5 +1,6 @@
 CXX ?= c++
 CXXFLAGS ?= -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
+TSANFLAGS ?= -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=thread -fno-omit-frame-pointer
 
 .PHONY: test clean
 
@@ -24,6 +25,19 @@ build/test_gart_range_bounds: test_gart_range_bounds.cpp ../../src/amd/gart_rang
 build/test_amdgpu_vram_allocator: test_amdgpu_vram_allocator.cpp ../../src/amd/amdgpu_vram.h ../../src/amd/amdgpu_range_bounds.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -pthread -I../../src/amd test_amdgpu_vram_allocator.cpp -o $@
+
+
+test-tsan: build/test_gart_range_bounds_tsan build/test_amdgpu_vram_allocator_tsan
+	./build/test_gart_range_bounds_tsan
+	./build/test_amdgpu_vram_allocator_tsan
+
+build/test_gart_range_bounds_tsan: test_gart_range_bounds.cpp ../../src/amd/gart_range_bounds.h ../../src/amd/amdgpu_range_bounds.h
+	mkdir -p build
+	$(CXX) $(TSANFLAGS) -pthread -I../../src/amd test_gart_range_bounds.cpp -o $@
+
+build/test_amdgpu_vram_allocator_tsan: test_amdgpu_vram_allocator.cpp ../../src/amd/amdgpu_vram.h ../../src/amd/amdgpu_range_bounds.h
+	mkdir -p build
+	$(CXX) $(TSANFLAGS) -pthread -I../../src/amd test_amdgpu_vram_allocator.cpp -o $@
 
 clean:
 	rm -rf build
