@@ -154,9 +154,11 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         return;
     }
     const uint64_t srcoff = srcpg.gpu_va - gmc.vram_start;
+    bool hdpUnavailable = false;
     auto fill_via_copy = [&](uint64_t dst, uint32_t pat) -> kern_return_t {
         bar0_memset_vram(dev, srcoff, pat, kBytes);
         if (!amdgpu_hdp_flush(dev)) {
+            hdpUnavailable = true;
             INIT_LOG("pdb0 selftest: HDP flush unavailable; refusing SDMA copy");
             return kIOReturnNotReady;
         }
@@ -179,7 +181,8 @@ static void run_pdb0_selftest(BringupContext &ctx) {
                  "(vram+%#llx) %s — kr=%#x, %u/%u dwords wrong",
                  pat, (unsigned long long)ident.gpu_va, (unsigned long long)off,
                  t.identity_ok ? "PASSED" : "FAILED", r, bad, kDwords);
-        gmc.vram_alloc.free(ident);
+        if (!hdpUnavailable) gmc.vram_alloc.free(ident);
+        else INIT_LOG("pdb0 selftest: identity destination quarantined because HDP staging was not acknowledged");
     } else {
         INIT_LOG("pdb0 selftest (b) IDENTITY: VRAM alloc failed");
     }
@@ -204,7 +207,8 @@ static void run_pdb0_selftest(BringupContext &ctx) {
                  (unsigned long long)gmc.vram_start,
                  t.alias_ok ? "PASSED — Apple's 0-based VRAM addresses now land"
                             : "FAILED", r, bad, kDwords);
-        gmc.vram_alloc.free(alias);
+        if (!hdpUnavailable) gmc.vram_alloc.free(alias);
+        else INIT_LOG("pdb0 selftest: alias destination quarantined because HDP staging was not acknowledged");
     } else {
         INIT_LOG("pdb0 selftest (a) ALIAS: VRAM alloc failed");
     }
