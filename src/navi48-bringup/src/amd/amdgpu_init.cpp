@@ -156,7 +156,10 @@ static void run_pdb0_selftest(BringupContext &ctx) {
     const uint64_t srcoff = srcpg.gpu_va - gmc.vram_start;
     auto fill_via_copy = [&](uint64_t dst, uint32_t pat) -> kern_return_t {
         bar0_memset_vram(dev, srcoff, pat, kBytes);
-        amdgpu_hdp_flush(dev);
+        if (!amdgpu_hdp_flush(dev)) {
+            INIT_LOG("pdb0 selftest: HDP flush unavailable; refusing SDMA copy");
+            return kIOReturnNotReady;
+        }
         return sdma_copy_linear_test(dev, inst, srcpg.gpu_va, dst, kBytes, 200000ull);
     };
     VRAMAllocation ident {};
@@ -275,7 +278,11 @@ static kern_return_t ensure_gfxhub_gart(BringupContext &ctx) {
     if (!dev.ip.isResolved(IPBlock::GC)) { INIT_LOG("gfxhub: GC base unresolved"); return kIOReturnNotReady; }
     kern_return_t r = gmc_gfxhub_gart_enable(dev, ctx.gmc);
     if (r != kIOReturnSuccess) { INIT_LOG("gfxhub: gart_enable failed %#x", r); return r; }
-    gmc_hdp_flush(dev);
+    r = gmc_hdp_flush(dev);
+    if (r != kIOReturnSuccess) {
+        INIT_LOG("gfxhub: HDP flush unavailable — GART remains NOT READY");
+        return r;
+    }
     r = gmc_flush_gpu_tlb(dev, ctx.gmc, ctx.gmc.gfxhub, /*vmid*/ 0, /*type*/ 0);
     if (r != kIOReturnSuccess) {
         INIT_LOG("gfxhub: VMID-0 TLB invalidation failed %#x — GART remains NOT READY", r);
