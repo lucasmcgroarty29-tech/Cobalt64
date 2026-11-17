@@ -618,3 +618,8 @@ The CP ring callers now restore their pre-submit software WPTR if the checked ce
 `sdma_wb_write32()` now reports invalid offsets or missing CPU mappings instead of silently returning. VRAM writes are staged without an unchecked internal HDP flush; each queue-publication path checks both writeback dwords and then performs its checked HDP drain before doorbell/MMIO publication. Fence-slot initialisation callers also propagate mapping failure before staging/submitting work.
 
 The VMFrag table builder now returns a status and refuses to run either sub-table or 64 KiB-leaf tests when the page-table write flush is unavailable. If a retry table rebuild fails, later legs are skipped. CONTEXT1 restoration still performs a checked HDP + VMID-1 invalidation, and the temporary table/data allocations remain quarantined if that restore acknowledgement fails.
+
+
+## Queue-1 scratch-ring failure cleanup (2026-11-17)
+
+The Queue-1 self-test now refuses to program the external queue if its fence writeback slot cannot be staged or if the scratch-ring HDP drain fails. In either case it retains the scratch-ring allocation rather than returning memory whose pending BAR0 writes may not have been acknowledged. The test reports NotReady and leaves QUEUE1 unprogrammed.
