@@ -412,7 +412,13 @@ kern_return_t native_s1b_run(BringupContext &ctx)
         WREG32(*dev, E.enLoReg, (uint32_t)((kMaxPfn - 1u) & 0xFFFFFFFFu));
         WREG32(*dev, E.enHiReg, (uint32_t)((kMaxPfn - 1u) >> 32));
         gN.cntlAfter = RREG32(*dev, E.cntlReg);
-        (void)gmc_flush_gpu_tlb(*dev, ctx.gmc, h, E.vmid, /*type*/ 0);
+        const kern_return_t tlbResult =
+            gmc_flush_gpu_tlb(*dev, ctx.gmc, h, E.vmid, /*type*/ 0);
+        if (tlbResult != kIOReturnSuccess) {
+            NAT_LOG("VMID %u TLB invalidation failed (%#x) - refusing all native VM legs",
+                    E.vmid, tlbResult);
+            s.stopped = true;
+        }
         NAT_LOG("GFXHUB CONTEXT%u (VMID %u, outside MES mask %#x): CNTL@%#x %#010x -> %#010x (want %#010x = DEPTH 3 / BLOCK 0 / RETRY 0 on "
                 "the hub_setup_vmid_config bits; RETRY reads %u) BASE %#010x:%#010x START %#010x END %#010x:%#010x; every other context untouched",
                 E.vmid, E.vmid, kMesVmidMaskGfxhub, E.cntlReg, gN.cntlBefore, gN.cntlAfter, cntl_native(gN.cntlBefore),
