@@ -1185,6 +1185,7 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
             if (ibStagingUncertain) *ibStagingUncertain = true;
             SDMA_LOG("srbm-test: %s %s — IB staging HDP flush unavailable; IB allocation must remain quarantined",
                      tag, srbm_leg_name(leg));
+            WREG32(dev, tr.reg_dw, tr.before);
             return false;
         }
         // sdma_v7_0_ring_emit_ib:283 — insert_nop((2 - wptr) & 7) so the dword

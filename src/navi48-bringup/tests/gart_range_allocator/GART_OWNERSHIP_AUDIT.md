@@ -649,3 +649,10 @@ The VMFrag path now also avoids restoring CONTEXT1 when an SDMA IB's completion 
 PSP command-ring submission now checks HDP before advancing its WPTR. TOC, TOC sub-bin and register-list staging refuse their PSP command when the payload flush fails. The PSP firmware-buffer bump allocator consumes and quarantines a slot after a failed flush instead of allowing a later stage to overwrite potentially pending bytes.
 
 RLC no longer marks its clear-state buffer populated until the CSB HDP drain succeeds. The compute-test path now checks the HDP result after shader, kernarg, result, IB and IB-test-target staging and stops before verification/submission when the drain is unavailable; its partially staged VRAM allocations remain owned rather than being recycled.
+
+
+## Remaining SDMA diagnostic staging flushes (2026-11-17)
+
+The SRBM self-test now checks the HDP drain after staging an indirect-buffer packet. If that drain is unavailable, it stops the target's remaining legs, restores the register it temporarily cleared, and retains the IB allocation rather than freeing memory whose staged writes may still be pending. Its initial IB clear is also checked and quarantines the allocation on failure.
+
+The VMID-specific IB copy helper checks the drain before publishing an INDIRECT_BUFFER packet. VMFrag's caller treats any non-successful helper result conservatively: it skips readback and later legs, and retains the table/data backing while leaving CONTEXT1 stable. The standalone VRAM-copy test likewise checks its initial source/destination staging drain and retains both allocations if visibility cannot be acknowledged.
