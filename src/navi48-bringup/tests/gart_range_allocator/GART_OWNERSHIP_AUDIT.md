@@ -374,3 +374,15 @@ already have reserved later ranges. The exact-offset path uses atomic
 high-water reads and is disabled in LOW mode; in HIGH mode it cannot overlap
 the reserved upper aperture. The host suite includes an eight-thread,
 512-reservation stress test and boundary tests for misaligned state and spans.
+
+
+## CherryRed Phase 52 integration boundary
+
+The supplied CherryRed Phase 52 material documents a host-side GPU virtual
+address free-range allocator and a lifecycle model, but did not include the
+allocator implementation source. No CherryRed code has therefore been copied
+or claimed as integrated. Its VA allocator is also a different address domain
+from Cobalt64's GART aperture and page-table ownership: the two cannot be
+substituted without translating reservation semantics, page granularity,
+Apple-owned exact offsets, hub/VMID visibility, and retirement rules. The
+current Cobalt64 work uses the Phase 52 material as a design reference only.
