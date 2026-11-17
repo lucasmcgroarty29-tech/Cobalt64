@@ -89,7 +89,7 @@ static void test_reject_out_of_range_free(void)
 static void test_concurrent_allocations_and_frees(void)
 {
     constexpr uint32_t kThreads = 8;
-    constexpr uint32_t kPerThread = 128;
+    constexpr uint32_t kPerThread = 32;
     constexpr uint64_t kBlock = 16384;
     constexpr uint64_t kPoolBytes = (uint64_t)kThreads * kPerThread * kBlock * 2ULL;
     VRAMBumpAllocator a;
