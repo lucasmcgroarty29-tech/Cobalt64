@@ -227,6 +227,18 @@ static void p3_pure() {
         expect(!aperture_points(GiB - 32, GiB, GiB, pt), "P3: a base too close to the top is refused");
         expect(!aperture_points(0, 0, 0, pt), "P3: zero limit is refused");
     }
+    {   // pool geometry must fail closed rather than wrap.
+        const Pools overflowBase = pool_sizes(UINT64_MAX - 7, 16, UINT64_MAX, UINT64_MAX, 0);
+        expect_u("P3: overflowing visible-pool base is rejected", overflowBase.visBase, 0);
+        expect_u("P3: overflowing visible-pool base has no size", overflowBase.visSize, 0);
+        const Pools overflowHi = pool_sizes(0, 0, UINT64_MAX - 7, UINT64_MAX, 16);
+        expect(!overflowHi.hi && overflowHi.hiSize == 0,
+               "P3: overflowing high-pool reserve is rejected");
+        const Pools normal = pool_sizes(kBase, kAllocOff, 256 * MiB, kVram, kReserve);
+        expect_u("P3: normal visible pool base is unchanged", normal.visBase, kBase + kAllocOff);
+        expect(normal.visSize == 217 * MiB && normal.hi,
+               "P3: normal visible and high pool geometry is unchanged");
+    }
 }
 
 static void p3b_layout() {
