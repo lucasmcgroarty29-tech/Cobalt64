@@ -23,7 +23,7 @@ build/test_gart_range_bounds: test_gart_range_bounds.cpp ../../src/amd/gart_rang
 
 build/test_amdgpu_vram_allocator: test_amdgpu_vram_allocator.cpp ../../src/amd/amdgpu_vram.h ../../src/amd/amdgpu_range_bounds.h
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) -I../../src/amd test_amdgpu_vram_allocator.cpp -o $@
+	$(CXX) $(CXXFLAGS) -pthread -I../../src/amd test_amdgpu_vram_allocator.cpp -o $@
 
 clean:
 	rm -rf build
