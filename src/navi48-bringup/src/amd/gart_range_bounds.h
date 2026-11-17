@@ -103,3 +103,15 @@ static inline bool gart_ranges_overlap(uint64_t total_bytes,
         ? (b_offset - a_offset) < a_size
         : (a_offset - b_offset) < b_size;
 }
+
+static inline bool gart_checked_bump_reserved_end(uint64_t total_bytes,
+                                                  uint64_t bump_start,
+                                                  uint64_t bump_offset,
+                                                  uint64_t *reserved_end)
+{
+    if (reserved_end == nullptr || bump_start > bump_offset ||
+        bump_offset > total_bytes)
+        return false;
+    *reserved_end = bump_start != 0 ? total_bytes : bump_offset;
+    return true;
+}
