@@ -666,3 +666,10 @@ The VMID-specific IB copy helper checks the drain before publishing an INDIRECT_
 ## Queue-1 self-test ring lifetime (2026-11-17)
 
 The Queue-1 routing self-test now treats a published WPTR without a confirmed fence as an in-flight ownership condition. It does not issue a second MMIO kick, disable the queue, or free the scratch ring when completion is uncertain. It also verifies that RB_ENABLE and IB_ENABLE read back clear before releasing the ring after a completed test. External queue programming is refused if the instance is already in the fail-stop `submission_uncertain` state.
+
+
+## Fence timeout propagation and Queue-1 shutdown verification (2026-11-17)
+
+Queue-0 ring, constant-fill, linear-copy and VMID IB-copy helpers now set `submission_uncertain` when a published command fails to produce its fence. This blocks later submissions rather than allowing another packet to be appended behind a command whose completion is unknown. The SRBM diagnostic applies the same rule and retains its IB allocation after a timeout.
+
+The Queue-1 self-test also stops after a successful kick without a fence, or after an uncertain WPTR publication. It does not attempt a second kick or release the scratch ring in those cases. After a completed test, it reads back both RB_ENABLE and IB_ENABLE and only releases the scratch ring when both are confirmed clear.
