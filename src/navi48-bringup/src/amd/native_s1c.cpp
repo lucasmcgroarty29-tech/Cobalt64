@@ -958,10 +958,13 @@ void n1c_close(const N1cRef &ref, const char *how) {
         if (program_root(s->vmid, gPark.pa) != kOk) leak = true; else parked = true;
     }
     if (!leak) {
-        bool slots = false;
         FenceWindow &win = gWin[s->slot];
+        // A failed fence-target publication may have written a PTE before its
+        // software slot record was committed. A poisoned window therefore
+        // requires clearing and invalidating the ENTIRE window, not just known slots.
+        bool slots = win.poisoned;
         for (uint32_t i = 0; i < N48N_FENCE_SLOTS; i++) {
-            if (!s->fslot[i].used) continue;
+            if (!s->fslot[i].used && !win.poisoned) continue;
             const uint64_t zero = 0;
             bar0_memcpy_to_vram(dev, gCtx->gmc.gart_pt_vram_offset + (win.gartOff / kPage + i) * 8ull, &zero, sizeof(zero));
             slots = true;
