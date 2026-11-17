@@ -2223,20 +2223,21 @@ cp_kick_doorbell(const DeviceContext &dev, const CPContext &cp)
     if (dev.bar2 == nullptr) return kIOReturnNotAttached;
     if (cp.wb_cpu == nullptr) return kIOReturnNotReady;
 
+    // Drain the staged ring writes BEFORE publishing the new write pointer.
+    // If HDP is unavailable, neither the shadow nor the doorbell is updated.
+    sysmem_wmb();
+    if (!amdgpu_hdp_flush(dev)) {
+        CP_LOG("CP doorbell refused: HDP flush window unavailable");
+        return kIOReturnNotReady;
+    }
+
     // 64-bit wptr shadow, matching atomic64_set on wptr_cpu_addr. Our
     // wptr never exceeds the ring size, so the upper dword is 0 — but it
     // has to be *written*, not merely assumed zero.
     const uint64_t wptr64 = static_cast<uint64_t>(cp.wptr);
     *reinterpret_cast<volatile uint64_t *>(
         static_cast<uint8_t *>(cp.wb_cpu) + kCPWBOffsetWptr) = wptr64;
-
-    // Make the staged PM4 dwords + the wptr shadow visible to the device
-    // before the doorbell write (deviation 3).
     sysmem_wmb();
-    if (!amdgpu_hdp_flush(dev)) {
-        CP_LOG("CP doorbell refused: HDP flush window unavailable");
-        return kIOReturnNotReady;
-    }
     const uint64_t off = static_cast<uint64_t>(cp.doorbell_index) *
                          kCPDoorbellStride;
     WDOORBELL64(dev, off, wptr64);
