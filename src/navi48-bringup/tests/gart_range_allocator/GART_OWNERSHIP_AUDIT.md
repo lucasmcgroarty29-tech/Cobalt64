@@ -529,3 +529,14 @@ flush acknowledgement or native kext build has been demonstrated.
 The NBIO remap-window selection logic is now isolated in the pure `hdp_flush_policy.h` helper and covered by a dedicated host test. Cases cover base-index-2 preference, base-index-0 fallback, zero/sentinel values, misalignment, aperture overflow, the exact final valid dword, and a null output pointer. The IOKit helper uses this same selection function.
 
 These tests validate only the address-selection policy. They do not execute MMIO writes, prove that the remap register is correctly programmed on Navi48, or establish hardware flush completion.
+
+
+## Native cleanup and GART publication quarantine (2026-11-17)
+
+A second call-site audit found that native BO retirement ignored the boolean result of the HDP flush before checking VMID invalidation. Normal BO release now requires both an issued/available HDP flush and an acknowledged VMID TLB invalidation. If either fails, the descriptor and backing allocation are intentionally retained instead of returning VRAM, GTT, or host-import memory to a reusable pool.
+
+Session close now clears fence-window PTEs and requires HDP plus VMID-0 invalidation BEFORE releasing BO backing. If that sequence is not acknowledged, the slot's fence window is permanently marked poisoned and the session's BO backing is retained. Future opens of that slot are refused rather than reusing potentially stale translations.
+
+The low-level GART sysmem bind path now consumes the bump range and retains its sysmem allocation if HDP publication cannot be issued. Existing-bus binding refuses success on the same failure. For reused slots, caller ownership of the new bus range remains with the caller; the old binding metadata is not overwritten.
+
+These changes are conservative leak/quarantine behavior, not a reclamation implementation. They reduce unsafe reuse but do not prove GPU completion or hardware correctness. Native IOKit translation units still require an actual macOS build and Navi48 hardware validation.
