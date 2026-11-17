@@ -82,6 +82,19 @@ static void test_reject_out_of_range_free(void)
     a.free(outside);
     assert(a.bytes_used() == used);
 
+    VRAMAllocation malformed = valid;
+    malformed.size = 0x2000ULL; // not a whole aligned allocation
+    a.free(malformed);
+    assert(a.bytes_used() == used);
+    malformed = valid;
+    malformed.alignment = 3;
+    a.free(malformed);
+    assert(a.bytes_used() == used);
+    malformed = valid;
+    malformed.gpu_va += 4096;
+    a.free(malformed);
+    assert(a.bytes_used() == used);
+
     a.free(valid);
     assert(a.bytes_used() == 0);
 }
