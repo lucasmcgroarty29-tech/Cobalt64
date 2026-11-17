@@ -59,6 +59,7 @@
 #include "amdgpu_psp.h"
 #include "amdgpu_ucode_psp.h"
 #include "amdgpu_log.h"
+#include "amdgpu_range_bounds.h"
 
 // bzero comes from the kernel's string.h via IOKit/IOLib.h (amdgpu_regs.h
 // declares memcpy the same way). Every zero-fill the reference writes as
@@ -146,7 +147,7 @@ psp_init(DeviceContext &dev, PSPContext &psp)
         return kIOReturnNotReady;
     }
     if (dev.vramLimit != 0 &&
-        dev.vramBase + kPSPVRAMSpanEnd > dev.vramLimit) {
+        !amdgpu_range_fits(dev.vramLimit, dev.vramBase, kPSPVRAMSpanEnd)) {
         PSP_LOG("psp_init: PSP VRAM span vram+[%#llx, %#llx) overruns the "
                 "bring-up region (vramLimit %#llx) — refusing",
                 (unsigned long long)dev.vramBase,
@@ -983,7 +984,7 @@ psp_load_toc(DeviceContext &dev, PSPContext &psp,
     uint32_t payload_offset = hdr->ucode_array_offset_bytes;
     uint32_t payload_size   = hdr->ucode_size_bytes;
     if (payload_offset == 0 ||
-        (uint64_t)payload_offset + payload_size > tocSize) {
+        !amdgpu_range_fits(tocSize, payload_offset, payload_size)) {
         PSP_LOG("load_toc: header bad — off=%u size=%u file=%u",
                 payload_offset, payload_size, tocSize);
         return kIOReturnBadArgument;
@@ -1312,7 +1313,7 @@ psp_fw_buf_stage(DeviceContext &dev, PSPContext &psp,
     const uint64_t slot_off =
         (psp.fwBufBumpOffset + kFwBufAlign - 1) & ~(kFwBufAlign - 1);
     const uint64_t slot_sz = (size + kFwBufAlign - 1) & ~(kFwBufAlign - 1);
-    if (slot_off + slot_sz > psp.fwBufSize) {
+    if (!amdgpu_range_fits(psp.fwBufSize, slot_off, slot_sz)) {
         PSP_LOG("fw_buf_stage: fw_buf exhausted (want %llu @ %llu, cap %llu)",
                 (unsigned long long)slot_sz, (unsigned long long)slot_off,
                 (unsigned long long)psp.fwBufSize);
