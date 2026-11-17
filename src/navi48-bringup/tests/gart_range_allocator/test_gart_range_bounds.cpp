@@ -41,6 +41,8 @@ static void test_bus_and_add_overflow(void)
 {
     uint64_t value = 0;
     assert(gart_checked_bus_span(0x1000, 4096));
+    assert(gart_checked_bus_span(UINT64_MAX - 4095ULL, 4096));
+    assert(!gart_checked_bus_span(UINT64_MAX - 4095ULL, 8192));
     assert(!gart_checked_bus_span(0, 4096));
     assert(!gart_checked_bus_span(UINT64_MAX - 1024, 4096));
     assert(gart_checked_add_u64(0x1000, 0x2000, &value));
