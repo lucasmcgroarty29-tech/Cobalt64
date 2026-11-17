@@ -223,3 +223,30 @@ The existing concurrency, PTE retirement, hub teardown and Apple mapping
 ownership questions remain open. In particular, this change does not add
 locking to the shared bump allocator and must not be interpreted as making
 concurrent mapping safe.
+
+
+## Runtime caller synchronization follow-up (2026-11-17)
+
+The active bump allocator has at least one externally entered caller that is
+not covered by the fast-copy lock:
+
+- `Navi48Ttl::queryCSBInfo()` calls `navi48_csb_publish()`. That callback
+  lazily allocates `gCsbMem`, calls `gmc_bind_existing()`, and sets the
+  `gCsbPublished` flag. No lock is taken in the visible callback or publisher.
+- Fast-copy 63's staging bind and fast-copy 89's read-back bind call
+  `gmc_bind_existing()` while holding `gFastCopyLock`, as documented in
+  `Navi48Bringup.cpp`.
+- `gFastCopyLock` does not serialize the TTL clear-state publisher. Therefore
+  the source currently does not demonstrate one common lock covering every
+  runtime bump allocation. A concurrent TTL callback and fast-copy enable
+  could race on `gart_bump_offset`; this is a source-level race candidate,
+  not a reproduced failure.
+
+Do not add a lock just around the bump increment. Exact-offset
+`gmc_bind_at()` must participate in the same reservation protocol, and the
+lock's sleepability, callback execution context, lock order, and interaction
+with Apple-owned hooks must be established first. A future synchronization
+change needs a single shared contract for bump reservations and exact-offset
+overlap checks, plus tests for simultaneous bind requests and interval
+collision. Until then, the checked arithmetic prevents malformed ranges but
+does not make concurrent reservations safe.
