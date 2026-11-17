@@ -637,3 +637,8 @@ The VMFrag diagnostic now treats any non-successful SDMA IB completion as uncert
 The VRAM-copy test now retains both source and destination allocations whenever the fence wait does not complete successfully; a timeout or failed submission is not proof that DMA has stopped. The multi-case sweep also stops and retains its region on any non-successful copy instead of reading potentially active memory and recycling it. Staging and both readback flush points are checked, and an unacknowledged flush aborts the diagnostic with its region retained.
 
 The SDMA writeback accessor now has a checked boolean result in both declaration and definition. All callers check invalid offsets/missing mappings; queue WPTR writes are staged first and followed by the existing checked HDP drain before publication. The SRBM leg correctly returns `false` on a failed fence-slot write rather than converting a nonzero IOReturn into boolean success.
+
+
+## VMFrag timeout keeps the test context stable (2026-11-17)
+
+The VMFrag path now also avoids restoring CONTEXT1 when an SDMA IB's completion is unconfirmed. Changing VMID-1's page-table base while the engine may still be walking that context could redirect an in-flight command into unrelated address space. In this exceptional path, the diagnostic leaves CONTEXT1 on the retained test table and keeps both allocations pinned; restoration is deferred until a positively acknowledged queue reset can establish that the engine is idle. This is a deliberate fail-stop state, not a successful cleanup.
