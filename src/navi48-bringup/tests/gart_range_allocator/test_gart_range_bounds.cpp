@@ -38,6 +38,16 @@ static void test_ranges_and_pte_bounds(void)
     assert(!gart_ranges_overlap(16384, 0xB000, 0x1000, 0xC000, 0x4000));
     assert(!gart_ranges_overlap(16384, 0xC000, 0x1000, 0xD000, 0x1000));
     assert(!gart_ranges_overlap(16384, UINT64_MAX, 1, 0, 4096));
+    uint64_t reserved_end = 0;
+    assert(gart_checked_bump_reserved_end(16384, 12288, 12288, &reserved_end));
+    assert(reserved_end == 16384); // HIGH mode reserves the whole upper tail
+    assert(gart_checked_bump_reserved_end(16384, 12288, 14336, &reserved_end));
+    assert(reserved_end == 16384); // still reserved after partial consumption
+    assert(gart_checked_bump_reserved_end(16384, 0, 4096, &reserved_end));
+    assert(reserved_end == 4096); // LOW mode protects only the used prefix
+    assert(!gart_checked_bump_reserved_end(16384, 8192, 4096, &reserved_end));
+    assert(!gart_checked_bump_reserved_end(16384, 0, 16385, &reserved_end));
+    assert(!gart_checked_bump_reserved_end(16384, 0, 0, nullptr));
     assert(gart_checked_pte_range(4096, 0, 512));
     assert(gart_checked_pte_range(4096, 511, 1));
     assert(!gart_checked_pte_range(4096, 512, 1));
