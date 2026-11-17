@@ -1167,7 +1167,7 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
 
     const uint64_t fence_gpu   = inst.wb_bus + kSDMAWBFenceOffset;
     const uint32_t fence_value = 0x5B000000u | (leg << 4) | (tr.reg_dw & 0xFu);
-    if (!sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0)) return kIOReturnNotReady;
+    if (!sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0)) return false;
 
     uint32_t pkt[24];
     uint32_t n = 0;
