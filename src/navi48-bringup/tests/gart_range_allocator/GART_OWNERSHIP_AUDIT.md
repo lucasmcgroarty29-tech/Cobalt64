@@ -604,3 +604,10 @@ The remaining unchecked HDP calls in CP/SDMA test paths are followed by these ce
 The PDB0 self-test now retains its temporary visible-VRAM destination allocations if the checked source-staging HDP flush fails. It refuses the SDMA copy and does not return those destinations to the allocator, avoiding reuse while CPU-written data may not have been drained. Its GART test page remains retained by design because the bump mapping has no unbind path.
 
 The SDMA VRAM writeback read helper now returns its invalid-read sentinel when HDP cannot be issued, rather than returning a potentially stale BAR0 value as if it were a valid observation.
+
+
+## CP ring software-pointer rollback (2026-11-17)
+
+The CP ring callers now restore their pre-submit software WPTR if the checked central doorbell gate refuses publication. The multi-part IB + EOP path also rolls back if either packet staging or the final kick fails; the EOP helper checks that its fence packet was actually staged. The ring-fetch probe and KIQ smoke path restore their starting pointer on kick failure. This prevents a later successful submission from accidentally publishing commands from an earlier call that returned NotReady.
+
+`cp_ring_write()` remains a staging helper and does not itself perform HDP I/O; the central `cp_kick_doorbell()` checks the ring-content flush before writing the polled WPTR shadow or doorbell. The direct compute-queue path has its own local next-WPTR transaction and checked pre-publication flush.
