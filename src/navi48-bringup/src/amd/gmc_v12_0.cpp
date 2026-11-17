@@ -2310,6 +2310,11 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
             (unsigned long long)kVMFragVAStart, (unsigned long long)kVMFragVAEnd,
             (unsigned long long)sub_va, (unsigned long long)leaf_va);
 
+    // A failed SDMA wait does not prove the queue stopped. Keep every
+    // allocation reachable by CONTEXT1 until an external reset/reboot.
+    bool dmaCompletionUncertain = false;
+    kern_return_t dmaUncertainResult = kIOReturnNotReady;
+
     // ---- one leg: fill the source through BAR0, copy, compare -----------
     auto run_leg = [&](const char *name, uint64_t ibVa, uint64_t ibOff,
                        uint64_t srcVa, uint64_t dstVa,
@@ -2330,6 +2335,14 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
         const kern_return_t r =
             sdma_ib_copy_linear_test(dev, inst, ibVa, ibOff, srcVa, dstVa,
                                      kVMFragCopyBytes, /*vmid*/ 1, tag, 200000ull);
+        if (r != kIOReturnSuccess) {
+            dmaCompletionUncertain = true;
+            dmaUncertainResult = r;
+            GMC_LOG("vmfrag %s: SDMA completion not acknowledged (%#x); skipping readback and retaining table/data allocations",
+                    name, r);
+            if (badOut) *badOut = 0;
+            return false;
+        }
         uint32_t bad = 0;
         for (uint32_t i = 0; i < kVMFragCopyBytes / 4; i++)
             if (RBAR0_32(dev, dstOff + (uint64_t)i * 4) != pattern) bad++;
@@ -2441,6 +2454,14 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                 (unsigned long long)data.gpu_va);
         if (out) *out = t;
         return restoreFlush;
+    }
+    if (dmaCompletionUncertain) {
+        t.allocations_quarantined = true;
+        GMC_LOG("vmfrag: CONTEXT1 registers and VMID-1 TLB restored, but SDMA completion was not acknowledged (%#x) — table %#llx and data %#llx remain allocated",
+                dmaUncertainResult, (unsigned long long)tbl.gpu_va,
+                (unsigned long long)data.gpu_va);
+        if (out) *out = t;
+        return dmaUncertainResult;
     }
     gmc.vram_alloc.free(data);
     gmc.vram_alloc.free(tbl);
