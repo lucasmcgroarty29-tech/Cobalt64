@@ -6,6 +6,10 @@
 
 static void test_page_spans(void)
 {
+    assert(amdgpu_range_fits(16, 0, 16));
+    assert(amdgpu_range_fits(16, 16, 0));
+    assert(!amdgpu_range_fits(16, 17, 0));
+    assert(!amdgpu_range_fits(16, UINT64_MAX, 1));
     uint64_t rounded = 0;
     uint32_t pages = 0;
     assert(gart_checked_page_span(1, &rounded, &pages));
