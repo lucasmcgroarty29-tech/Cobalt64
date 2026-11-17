@@ -35,6 +35,11 @@ static void normal_lifecycle_requires_each_context() {
 }
 
 static void rejects_skipped_steps_and_unknown_contexts() {
+    GARTMappingLifecycle empty{};
+    gart_lifecycle_init(&empty, 0);
+    assert(!gart_lifecycle_valid(&empty));
+    assert(!gart_lifecycle_pte_written(&empty));
+
     GARTMappingLifecycle l{};
     gart_lifecycle_init(&l, 0x00010001u);
     assert(!gart_lifecycle_mapping_visible(&l));
@@ -69,6 +74,21 @@ static void quarantine_is_fail_closed() {
     assert(!gart_lifecycle_retire_complete(&l));
     assert(!gart_lifecycle_pte_written(&l));
     assert(gart_lifecycle_valid(&l));
+
+    // A timeout on the second hub leaves the mapping quarantined even though
+    // the first context already acknowledged its invalidation.
+    GARTMappingLifecycle partial{};
+    gart_lifecycle_init(&partial, 0x00010001u);
+    assert(gart_lifecycle_pte_written(&partial));
+    assert(gart_lifecycle_mapping_visible(&partial));
+    assert(gart_lifecycle_begin_retire(&partial));
+    assert(gart_lifecycle_ptes_cleared(&partial));
+    assert(gart_lifecycle_hdp_flushed(&partial));
+    assert(gart_lifecycle_note_tlb_invalidated(&partial, 0x00000001u));
+    assert(gart_lifecycle_quarantine(&partial));
+    assert(!gart_lifecycle_note_tlb_invalidated(&partial, 0x00010000u));
+    assert(!gart_lifecycle_retire_complete(&partial));
+    assert(gart_lifecycle_valid(&partial));
 }
 
 int main() {
