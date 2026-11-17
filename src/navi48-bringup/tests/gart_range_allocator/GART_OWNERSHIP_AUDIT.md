@@ -64,6 +64,12 @@ It does not write PTEs, flush HDP, invalidate TLBs, wait for GPU fences, or
 manage `SysMem` lifetimes. Those responsibilities must remain in the
 driver layer.
 
+Run its host suite with `make -C src/navi48-bringup/tests/gart_range_allocator test`.
+The suite includes deterministic reuse/coalescing, invalid-input and metadata
+capacity checks, plus 50,000 randomized allocate/free operations with full
+aperture accounting. The updated granularity checks have been added to the
+suite; they still need a fresh run after this API change.
+
 ## Next safe engineering step
 
 Add a host-side lifecycle model that represents the states
