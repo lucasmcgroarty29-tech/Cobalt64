@@ -29,6 +29,27 @@ static void test_page_spans(void)
                                    &rounded, &pages));
 }
 
+
+static void test_checked_geometry_arithmetic(void)
+{
+    uint64_t result = 0;
+    assert(amdgpu_checked_add_u64(0x1000, 0x2000, &result));
+    assert(result == 0x3000);
+    assert(!amdgpu_checked_add_u64(UINT64_MAX, 1, &result));
+    assert(!amdgpu_checked_add_u64(1, 1, nullptr));
+
+    assert(amdgpu_checked_align_up_u64(0x1001, 0x1000, &result));
+    assert(result == 0x2000);
+    assert(amdgpu_checked_align_up_u64(0x2000, 0x1000, &result));
+    assert(result == 0x2000);
+    assert(amdgpu_checked_align_up_u64(0, 0x1000, &result));
+    assert(result == 0);
+    assert(!amdgpu_checked_align_up_u64(UINT64_MAX, 0x1000, &result));
+    assert(!amdgpu_checked_align_up_u64(0x1000, 0, &result));
+    assert(!amdgpu_checked_align_up_u64(0x1000, 3, &result));
+    assert(!amdgpu_checked_align_up_u64(0x1000, 0x1000, nullptr));
+}
+
 static void test_ranges_and_pte_bounds(void)
 {
     assert(gart_checked_range(16384, 0, 4096));
@@ -129,9 +150,10 @@ static void test_bus_and_add_overflow(void)
 int main(void)
 {
     test_page_spans();
+    test_checked_geometry_arithmetic();
     test_ranges_and_pte_bounds();
     test_atomic_bump_reservations();
     test_bus_and_add_overflow();
-    puts("GART checked bounds: 4 test groups passed");
+    puts("GART checked bounds: 5 test groups passed");
     return 0;
 }
