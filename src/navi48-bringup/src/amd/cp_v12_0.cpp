@@ -1917,7 +1917,7 @@ kern_return_t
 cp_wait_fence(CPContext &cp, uint32_t fence, uint64_t timeout_us,
               uint64_t *observed, uint64_t *elapsed_us)
 {
-    if (!cp.inited || cp.fence_cpu == nullptr) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain || cp.fence_cpu == nullptr) return kIOReturnNotReady;
     // First 5 ms at 1 us steps (the GPU answers in microseconds when healthy),
     // then 1 ms sleeps so a wedged ring does not hold a core for the timeout.
     constexpr uint64_t kFastUs = 5000;
