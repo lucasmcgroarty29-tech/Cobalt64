@@ -1536,7 +1536,10 @@ cp_gfx_mqd_init(const DeviceContext &dev, CPContext &cp)
     // Publish: the MQD is GART sysmem, so a store fence is what matters;
     // the HDP flush mirrors amdgpu_gfx_enable_kgq's amdgpu_device_flush_hdp.
     sysmem_wmb();
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        CP_LOG("gfx_mqd_init: HDP flush unavailable; refusing to publish MQD readiness");
+        return kIOReturnNotReady;
+    }
     cp.gfx_mqd_inited = true;
 
     CP_LOG("gfx_mqd_init: v12_gfx_mqd @ mc=%#llx (%u dwords) — mqd_base=%08x_%08x "
@@ -1680,7 +1683,10 @@ cp_gfx_mqd_init_external(const DeviceContext &dev, CPContext &cp,
     m[GfxMqd::fence_address_hi]     = 0;
 
     sysmem_wmb();
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        CP_LOG("gfx_mqd_external: HDP flush unavailable; refusing to publish external MQD");
+        return kIOReturnNotReady;
+    }
 
     q.rb_bufsz         = rb_bufsz;
     q.hqd_cntl         = m[GfxMqd::cp_gfx_hqd_cntl];
@@ -1739,7 +1745,10 @@ cp_map_gfx_kgq_mes(const DeviceContext &dev, CPContext &cp, MESContext &mes)
 
     // amdgpu_gfx_enable_kgq: amdgpu_device_flush_hdp before the map.
     sysmem_wmb();
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        CP_LOG("map_gfx_kgq_mes: HDP flush unavailable; refusing MES ADD_QUEUE");
+        return kIOReturnNotReady;
+    }
 
     MESAddQueueInput in;
     memset(&in, 0, sizeof(in));
@@ -2224,6 +2233,10 @@ cp_kick_doorbell(const DeviceContext &dev, const CPContext &cp)
     // Make the staged PM4 dwords + the wptr shadow visible to the device
     // before the doorbell write (deviation 3).
     sysmem_wmb();
+    if (!amdgpu_hdp_flush(dev)) {
+        CP_LOG("CP doorbell refused: HDP flush window unavailable");
+        return kIOReturnNotReady;
+    }
     const uint64_t off = static_cast<uint64_t>(cp.doorbell_index) *
                          kCPDoorbellStride;
     WDOORBELL64(dev, off, wptr64);
@@ -2785,7 +2798,10 @@ cp_compute_mqd_init(const DeviceContext &dev, ComputeQueue &cq)
     m[M::fence_address_hi] = 0;
 
     sysmem_wmb();
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        CP_LOG("compute_mqd_init: HDP flush unavailable; refusing MQD readiness");
+        return kIOReturnNotReady;
+    }
 
     CP_LOG("compute_mqd_init: mqd_mc=%#llx pq_base=%08x_%08x (ring %#llx >> 8) "
            "pq_control=%#010x (qsize=%u rptr_blk=9) doorbell_ctrl=%#010x (idx %#x) "
@@ -2809,7 +2825,10 @@ cp_compute_queue_map_mes(const DeviceContext &dev, ComputeQueue &cq, MESContext 
         return kIOReturnNotReady;
     }
     sysmem_wmb();
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        CP_LOG("compute_queue_map: HDP flush unavailable; refusing MES ADD_QUEUE");
+        return kIOReturnNotReady;
+    }
 
     MESAddQueueInput in;
     memset(&in, 0, sizeof(in));
@@ -2898,7 +2917,10 @@ cp_compute_submit_ib(const DeviceContext &dev, ComputeQueue &cq, uint64_t ib_gpu
     *reinterpret_cast<volatile uint64_t *>(
         static_cast<uint8_t *>(cq.wb_cpu) + kCPWBOffsetWptr) = wptr64;
     sysmem_wmb();
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        CP_LOG("compute submit refused: HDP flush window unavailable; queue was not doorbelled");
+        return kIOReturnNotReady;
+    }
     if (dev.bar2 == nullptr) return kIOReturnNotAttached;
     WDOORBELL64(dev, (uint64_t)cq.doorbell_index * kCPDoorbellStride, wptr64);
 
