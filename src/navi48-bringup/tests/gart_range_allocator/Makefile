@@ -4,11 +4,12 @@ TSANFLAGS ?= -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=thread -fno-omit
 
 .PHONY: test test-tsan clean
 
-test: build/test_gart_range_allocator build/test_gart_mapping_lifecycle build/test_gart_range_bounds build/test_amdgpu_vram_allocator
+test: build/test_gart_range_allocator build/test_gart_mapping_lifecycle build/test_gart_range_bounds build/test_amdgpu_vram_allocator build/test_rebar_pool_geometry
 	./build/test_gart_range_allocator
 	./build/test_gart_mapping_lifecycle
 	./build/test_gart_range_bounds
 	./build/test_amdgpu_vram_allocator
+	./build/test_rebar_pool_geometry
 
 build/test_gart_range_allocator: ../../src/amd/gart_range_allocator.cpp test_gart_range_allocator.cpp ../../src/amd/gart_range_allocator.h
 	mkdir -p build
@@ -26,6 +27,11 @@ build/test_amdgpu_vram_allocator: test_amdgpu_vram_allocator.cpp ../../src/amd/a
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -pthread -I../../src/amd test_amdgpu_vram_allocator.cpp -o $@
 
+
+
+build/test_rebar_pool_geometry: test_rebar_pool_geometry.cpp ../../src/amd/rebar_pure.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -I../../src/amd test_rebar_pool_geometry.cpp -o $@
 
 test-tsan: build/test_gart_range_bounds_tsan build/test_amdgpu_vram_allocator_tsan
 	./build/test_gart_range_bounds_tsan
