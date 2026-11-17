@@ -103,6 +103,7 @@ static void test_atomic_bump_reservations(void)
     assert(!gart_atomic_bump_reserve(&next, kTotal, 1024, &unused));
     assert(!gart_atomic_bump_reserve(nullptr, kTotal, kSpan, &unused));
     assert(!gart_atomic_bump_reserve(&next, kTotal, kSpan, nullptr));
+    assert(!gart_atomic_bump_reserve(&next, kTotal, kSpan, &next));
 }
 
 static void test_bus_and_add_overflow(void)
