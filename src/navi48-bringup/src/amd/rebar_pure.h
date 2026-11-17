@@ -227,9 +227,18 @@ constexpr uint64_t visible_size(uint64_t vramLimit, uint64_t bar0Size, uint64_t 
 struct Pools { uint64_t visBase; uint64_t visSize; bool hi; uint64_t hiBase; uint64_t hiSize; };
 // gmc_vram_alloc_init: the visible pool is [vramBase + allocOff, vramLimit); the hi pool is [vramLimit, vramBytes - hiReserve) when there is room.
 constexpr Pools pool_sizes(uint64_t vramBase, uint64_t allocOff, uint64_t vramLimit, uint64_t vramBytes, uint64_t hiReserve) {
-    Pools p { vramBase + allocOff, 0ull, false, 0ull, 0ull };
+    Pools p { 0ull, 0ull, false, 0ull, 0ull };
+    if (allocOff > UINT64_MAX - vramBase) return p;
+    p.visBase = vramBase + allocOff;
     if (vramLimit > p.visBase) p.visSize = vramLimit - p.visBase;
-    if (vramBytes > vramLimit + hiReserve) { p.hi = true; p.hiBase = vramLimit; p.hiSize = vramBytes - hiReserve - vramLimit; }
+    if (hiReserve <= UINT64_MAX - vramLimit) {
+        const uint64_t hiEnd = vramLimit + hiReserve;
+        if (vramBytes > hiEnd) {
+            p.hi = true;
+            p.hiBase = vramLimit;
+            p.hiSize = vramBytes - hiEnd;
+        }
+    }
     return p;
 }
 
