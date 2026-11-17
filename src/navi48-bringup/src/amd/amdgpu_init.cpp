@@ -169,7 +169,7 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         const uint64_t off = ident.gpu_va - gmc.vram_start;
         const uint32_t pat = 0x1DE71717u;   // 'IDEnTITY'-ish
         bar0_memset_vram(dev, off, 0xDEADBEEFu, kBytes);
-        amdgpu_hdp_flush(dev);
+        // fill_via_copy performs the checked drain for both this poison and its source.
         t.identity_addr = ident.gpu_va;
         kern_return_t r = fill_via_copy(ident.gpu_va, pat);
         uint32_t bad = 0;
@@ -193,7 +193,7 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         const uint64_t off       = alias.gpu_va - gmc.vram_start;  // 0-based address
         const uint32_t pat       = 0x0BA5ED00u;                    // '0-BASED'
         bar0_memset_vram(dev, off, 0xDEADBEEFu, kBytes);
-        amdgpu_hdp_flush(dev);
+        // fill_via_copy performs the checked drain for both this poison and its source.
         t.alias_addr = off;
         kern_return_t r = fill_via_copy(off, pat);
         uint32_t bad = 0;

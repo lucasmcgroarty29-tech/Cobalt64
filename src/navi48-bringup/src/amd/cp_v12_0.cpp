@@ -1837,7 +1837,7 @@ cp_ring_test_scratch(const DeviceContext &dev, CPContext &cp, uint64_t timeout_u
            "(SET_UCONFIG_REG reg %#x <- 0xDEADBEEF), wptr -> %u",
            scratch, before, pkt[0], pkt[1], pkt[2], pkt[1], cp.wptr);
 
-    amdgpu_hdp_flush(dev);
+    // cp_kick_doorbell performs the checked HDP drain before publishing WPTR.
     kern_return_t r = cp_kick_doorbell(dev, cp);
     if (r != kIOReturnSuccess) { cp.wptr = startWptr; return r; }
 
@@ -1895,7 +1895,7 @@ cp_submit_ib(const DeviceContext &dev, CPContext &cp, uint64_t ib_gpu_va,
     const uint32_t fence = cp_emit_eop_fence(cp);
     if (fence == 0) { cp.wptr = startWptr; return kIOReturnNotReady; }
 
-    amdgpu_hdp_flush(dev);
+    // cp_kick_doorbell performs the checked HDP drain before publishing WPTR.
     kern_return_t r = cp_kick_doorbell(dev, cp);
     if (r != kIOReturnSuccess) { cp.wptr = startWptr; return r; }
     if (out_fence) *out_fence = fence;
@@ -2002,7 +2002,7 @@ cp_ring_fetch_probe(const DeviceContext &dev, CPContext &cp,
            nops, cp_p3_nop1(), wptr_before, cp.wptr);
 
     // Drain posted writes so the CP sees the ring contents, then kick.
-    amdgpu_hdp_flush(dev);
+    // cp_kick_doorbell performs the checked HDP drain before publishing WPTR.
     kern_return_t r = cp_kick_doorbell(dev, cp);
     if (r != kIOReturnSuccess) { cp.wptr = wptr_before; return r; }
 
@@ -2366,9 +2366,7 @@ cp_kiq_smoke_test(DeviceContext &dev,
     // (3) Pre-fill the fence dword with 0xCAFEBABE so a "no write"
     // outcome is distinguishable from accidental zero.
     bar0_memset_vram(dev, fence_vram_off, 0xCAFEBABEu, 4);
-    // HDP flush so the GPU sees the pre-fill (paranoid — RELEASE_MEM
-    // overwrites it anyway, but keeps the readback clean).
-    amdgpu_hdp_flush(dev);
+    // cp_kick_doorbell's checked drain covers this pre-fill and the ring packets.
 
     // (4) Build the PM4 packet sequence in a local CPU buffer.
     //
@@ -2434,11 +2432,8 @@ cp_kiq_smoke_test(DeviceContext &dev,
            n, start_wptr, start_wptr, cp.wptr,
            (unsigned long long)cp.ring_bus);
 
-    // (7) HDP flush — write + readback per upstream amdgpu_hdp_flush.
-    // Drains posted writes so CP sees fresh ring contents.
-    amdgpu_hdp_flush(dev);
-
-    // (8) Update wptr shadow + ring the GFX ring's doorbell on BAR2.
+    // (7) Update wptr shadow + ring the GFX ring's doorbell on BAR2.
+    // cp_kick_doorbell performs the checked HDP drain before publication.
     // Goes through cp_kick_doorbell so there is exactly one place that
     // knows the shadow and the doorbell are 64-bit stores (see that
     // function and gfx_v12_0_ring_set_wptr_gfx).
