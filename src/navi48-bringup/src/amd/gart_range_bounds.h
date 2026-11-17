@@ -121,11 +121,13 @@ static inline bool gart_atomic_bump_reserve(uint64_t *next_offset,
                                             uint64_t span_bytes,
                                             uint64_t *reserved_offset)
 {
-    if (next_offset == nullptr || reserved_offset == nullptr || span_bytes == 0)
+    if (next_offset == nullptr || reserved_offset == nullptr || span_bytes == 0 ||
+        (span_bytes & 4095ULL) != 0)
         return false;
     uint64_t current = __atomic_load_n(next_offset, __ATOMIC_ACQUIRE);
     for (;;) {
-        if (!gart_checked_range(total_bytes, current, span_bytes))
+        if ((current & 4095ULL) != 0 ||
+            !gart_checked_range(total_bytes, current, span_bytes))
             return false;
         const uint64_t desired = current + span_bytes;
         if (__atomic_compare_exchange_n(next_offset, &current, desired, false,
