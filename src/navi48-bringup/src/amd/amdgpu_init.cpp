@@ -180,6 +180,10 @@ static void run_pdb0_selftest(BringupContext &ctx) {
             INIT_LOG("pdb0 selftest: identity DMA completion unconfirmed; retaining source/destination and leaving PDB0 unchanged");
             return;
         }
+        if (hdpUnavailable) {
+            INIT_LOG("pdb0 selftest: identity staging was not acknowledged; skipping readback, later legs and CONTEXT0 revert");
+            return;
+        }
         uint32_t bad = 0;
         for (uint32_t i = 0; i < kDwords; i++)
             if (RBAR0_32(dev, off + (uint64_t)i * 4) != pat) bad++;
@@ -206,6 +210,10 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         kern_return_t r = fill_via_copy(off, pat);
         if (inst.submission_uncertain) {
             INIT_LOG("pdb0 selftest: alias DMA completion unconfirmed; retaining source/destination and leaving PDB0 unchanged");
+            return;
+        }
+        if (hdpUnavailable) {
+            INIT_LOG("pdb0 selftest: alias staging was not acknowledged; skipping readback, later legs and CONTEXT0 revert");
             return;
         }
         uint32_t bad = 0;
@@ -241,6 +249,10 @@ static void run_pdb0_selftest(BringupContext &ctx) {
             kern_return_t r = fill_via_copy(mc, pat);
             if (inst.submission_uncertain) {
                 INIT_LOG("pdb0 selftest: GART DMA completion unconfirmed; retaining bound sysmem and leaving PDB0 unchanged");
+                return;
+            }
+            if (hdpUnavailable) {
+                INIT_LOG("pdb0 selftest: GART staging was not acknowledged; skipping readback and CONTEXT0 revert");
                 return;
             }
             sysmem_rmb();
