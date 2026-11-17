@@ -2370,7 +2370,7 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                            data_off + 0x10000, data_off + 0x11000,
                            0x5B7AB1E0u, 0xA1, &t.sub_bad);
     }
-    if (tableReady && !t.sub_ok) {
+    if (tableReady && !t.sub_ok && !dmaCompletionUncertain) {
         GMC_LOG("vmfrag: leg (a) failed with pointer P=0 / PTE P=1 — retrying ONCE "
                 "with the inverse polarity, which is the one rule the the reviewer pass "
                 "could not settle from Apple's code");
@@ -2386,7 +2386,7 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     }
 
     // ---- leg (b): the 64 KiB leaf ---------------------------------------
-    if (tableReady) {
+    if (tableReady && !dmaCompletionUncertain) {
         t.leaf_ok = run_leg("(b) 64 KiB LEAF", leaf_va + 0x2000, data_off + 0x2000,
                             leaf_va + 0x0000, leaf_va + 0x1000,
                             data_off + 0x0000, data_off + 0x1000,
