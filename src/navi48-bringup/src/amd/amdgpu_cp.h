@@ -915,9 +915,9 @@ kern_return_t cp_kiq_smoke_test(DeviceContext &dev,
 // amdgpu_mes_map_legacy_queue with queue_type COMPUTE.
 struct ComputeQueue {
     bool      inited { false };
-    bool      mapped { false };
+    bool      mapped { false };     // MES acked ADD_QUEUE
     // Sticky fail-stop after a published compute command does not retire.
-    bool      submission_uncertain { false };     // MES acked ADD_QUEUE
+    bool      submission_uncertain { false };
 
     SysMem    ring_sys {};  uint64_t ring_bus { 0 };  void *ring_cpu { nullptr };
     SysMem    mqd_sys  {};  uint64_t mqd_bus  { 0 };  void *mqd_cpu  { nullptr };

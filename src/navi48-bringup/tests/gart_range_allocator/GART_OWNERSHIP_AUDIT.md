@@ -678,3 +678,10 @@ The Queue-1 self-test also stops after a successful kick without a fence, or aft
 ## SDMA fail-stop lifetime through teardown (2026-11-17)
 
 The instance-level uncertain state is now sticky across ordinary release/resume paths. `sdma_gfx_resume_instance` refuses to restart an uncertain instance, and `sdma_release_storage` refuses to return its ring or writeback backing to the allocator or OS. This preserves the backing through driver teardown rather than assuming that disabling a queue or timing out a fence proves DMA has stopped. A fresh device initialisation is required to establish a clean instance state.
+
+
+## CP and MEC queue ownership after uncertain completion (2026-11-17)
+
+The GFX CP ring and MES-mapped compute queues now carry sticky `submission_uncertain` state. A ring-fetch, scratch-register, EOP-fence or compute-fence timeout blocks further submissions and prevents `cp_release_storage` / `cp_compute_queue_release` from returning ring, MQD, EOP or writeback backing to the allocator. Queue setup and MES remapping are refused after uncertainty; an unacknowledged MES ADD_QUEUE is also treated as uncertain ownership. The legacy CPInit path now propagates a ring-fetch timeout instead of reporting the ring ready.
+
+Several CP and native GFX paths had extra unchecked HDP flushes immediately before helpers that already perform a checked drain before publishing WPTR. Those redundant calls were removed so there is one authoritative checked publication barrier. The PDB0 self-test likewise relies on its checked `fill_via_copy` drain for both the destination poison and source pattern. If SDMA completion becomes uncertain in any PDB0 leg, it stops before readback, later legs or CONTEXT0 restoration and retains the VRAM/sysmem backing while leaving the test context stable.
