@@ -608,8 +608,12 @@ sdma_kick_external_doorbell(const DeviceContext &dev, const SDMAInstance &inst,
     sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4,
                     static_cast<uint32_t>(v >> 32));
 
-    // 2) HDP flush so the engine's read of wptr_poll_addr drains past our write.
-    amdgpu_hdp_flush(dev);
+    // 2) Do not ring either doorbell or MMIO WPTR unless the shadow write is
+    //    visible through the checked HDP path.
+    if (!amdgpu_hdp_flush(dev)) {
+        SDMA_LOG("SDMA%u ext-kick refused: HDP flush window unavailable", inst.instance);
+        return kIOReturnNotReady;
+    }
 
     // 3) BAR2 doorbell, dword-indexed (byte offset = index * 4).
     const uint64_t offs = static_cast<uint64_t>(doorbellIndex) * 4ull;
@@ -901,7 +905,10 @@ sdma_q1_kick_doorbell_only(const DeviceContext &dev, const SDMAInstance &inst,
     sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v));
     sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4,
                     static_cast<uint32_t>(v >> 32));
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        SDMA_LOG("SDMA%u QUEUE%u doorbell-only kick refused: HDP flush window unavailable", inst.instance, queue);
+        return kIOReturnNotReady;
+    }
 
     const uint64_t offs = static_cast<uint64_t>(doorbellIndex) * 4ull;
     if (dev.bar2 == nullptr || !amdgpu_range_fits(dev.bar2Size, offs, 8)) {
