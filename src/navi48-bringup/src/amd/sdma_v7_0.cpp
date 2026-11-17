@@ -109,20 +109,22 @@ sdma_wb_read32(const DeviceContext &dev, const SDMAInstance &inst,
         static_cast<const uint8_t *>(inst.wb_cpu) + byte_offset);
 }
 
-void
+bool
 sdma_wb_write32(const DeviceContext &dev, const SDMAInstance &inst,
                 uint32_t byte_offset, uint32_t value)
 {
-    if (!amdgpu_range_fits(kSDMAWBPageBytes, byte_offset, 4)) return;
+    if (!amdgpu_range_fits(kSDMAWBPageBytes, byte_offset, 4)) return false;
     if (inst.wb_in_vram) {
+        // Stage only. The queue-publication path performs one checked HDP
+        // flush after all shadow dwords have been written.
         WBAR0_32(dev, inst.wb_vram_off + byte_offset, value);
-        amdgpu_hdp_flush(dev);
-        return;
+        return true;
     }
-    if (inst.wb_cpu == nullptr) return;
+    if (inst.wb_cpu == nullptr) return false;
     *reinterpret_cast<volatile uint32_t *>(
         static_cast<uint8_t *>(inst.wb_cpu) + byte_offset) = value;
     sysmem_wmb();
+    return true;
 }
 
 //------------------------------------------------------------------
@@ -609,9 +611,9 @@ sdma_kick_external_doorbell(const DeviceContext &dev, const SDMAInstance &inst,
 
     // 1) WPTR shadow in the EXTERNAL slot -- not kSDMAWBWptrOffset, which is
     //    QUEUE0's and belongs to the ring we are actively running.
-    sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v));
-    sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4,
-                    static_cast<uint32_t>(v >> 32));
+    if (!sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v)) ||
+        !sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4, static_cast<uint32_t>(v >> 32)))
+        return kIOReturnNotReady;
 
     // 2) Do not ring either doorbell or MMIO WPTR unless the shadow write is
     //    visible through the checked HDP path.
@@ -910,9 +912,9 @@ sdma_q1_kick_doorbell_only(const DeviceContext &dev, const SDMAInstance &inst,
     // Preflight before updating a writeback pointer that the engine may poll.
     if (!amdgpu_hdp_flush(dev)) return kIOReturnNotReady;
 
-    sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v));
-    sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4,
-                    static_cast<uint32_t>(v >> 32));
+    if (!sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v)) ||
+        !sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4, static_cast<uint32_t>(v >> 32)))
+        return kIOReturnNotReady;
     if (!amdgpu_hdp_flush(dev)) {
         SDMA_LOG("SDMA%u QUEUE%u doorbell-only kick refused: HDP flush window unavailable", inst.instance, queue);
         return kIOReturnNotReady;
@@ -1011,7 +1013,7 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     const uint64_t fence_gpu    = inst.wb_bus + kSDMAWBExtFenceOffset;
     const uint32_t fence_value  = 0x51CAFE01u;            // 'Q1 CAFE'
     t.fence_gpu = fence_gpu;
-    sdma_wb_write32(dev, inst, kSDMAWBExtFenceOffset, 0);
+    if (!sdma_wb_write32(dev, inst, kSDMAWBExtFenceOffset, 0)) return kIOReturnNotReady;
 
     uint32_t pkt[4];
     pkt[0] = SDMA_PKT_HEADER_OP(SDMA_OP_FENCE);
@@ -1155,7 +1157,7 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
 
     const uint64_t fence_gpu   = inst.wb_bus + kSDMAWBFenceOffset;
     const uint32_t fence_value = 0x5B000000u | (leg << 4) | (tr.reg_dw & 0xFu);
-    sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0);
+    if (!sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0)) return kIOReturnNotReady;
 
     uint32_t pkt[24];
     uint32_t n = 0;
@@ -1435,10 +1437,9 @@ sdma_kick_doorbell(const DeviceContext &dev, const SDMAInstance &inst)
     //    sdma_v7_0_ring_set_wptr line 220 writes (ring->wptr << 2) to
     //    ring->wptr_cpu_addr. With MCU_WPTR_POLL_ENABLE=1 the SDMA MCU
     //    polls this slot. Upstream's contract is the contract.
-    sdma_wb_write32(dev, inst, kSDMAWBWptrOffset,
-                    static_cast<uint32_t>(v));
-    sdma_wb_write32(dev, inst, kSDMAWBWptrOffset + 4,
-                    static_cast<uint32_t>(v >> 32));
+    if (!sdma_wb_write32(dev, inst, kSDMAWBWptrOffset, static_cast<uint32_t>(v)) ||
+        !sdma_wb_write32(dev, inst, kSDMAWBWptrOffset + 4, static_cast<uint32_t>(v >> 32)))
+        return kIOReturnNotReady;
 
     // 2) HDP flush so the engine's read of wptr_poll_addr drains past
     //    our CPU write. Do not publish the pointer through either path on failure.
@@ -1515,7 +1516,7 @@ sdma_ring_test(const DeviceContext &dev, SDMAInstance &inst,
 
     // Use an unused part of the WB page (offset 0x80) as the fence
     // landing slot. Pre-clear it.
-    sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0);
+    if (!sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0)) return kIOReturnNotReady;
     const uint64_t fence_gpu = inst.wb_bus + kSDMAWBFenceOffset;
     const uint32_t fence_value = 0xCAFEC0DEu;
 
@@ -1594,7 +1595,7 @@ sdma_const_fill_test(const DeviceContext &dev, SDMAInstance &inst,
         return kIOReturnBadArgument;
     }
 
-    sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0);
+    if (!sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0)) return kIOReturnNotReady;
     const uint64_t fence_gpu   = inst.wb_bus + kSDMAWBFenceOffset;
     const uint32_t fence_value = 0xF111DA7Au;
 
@@ -1649,7 +1650,7 @@ sdma_copy_linear_test(const DeviceContext &dev, SDMAInstance &inst,
         return kIOReturnBadArgument;
     }
 
-    sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0);
+    if (!sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0)) return kIOReturnNotReady;
     const uint64_t fence_gpu   = inst.wb_bus + kSDMAWBFenceOffset;
     const uint32_t fence_value = 0xDEC0FFEEu;
 
@@ -1757,7 +1758,7 @@ sdma_ib_copy_linear_test(const DeviceContext &dev, SDMAInstance &inst,
 
     const uint64_t fence_gpu   = inst.wb_bus + kSDMAWBFenceOffset;
     const uint32_t fence_value = 0x5C000000u | (tag & 0xFFFFu);
-    sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0);
+    if (!sdma_wb_write32(dev, inst, kSDMAWBFenceOffset, 0)) return kIOReturnNotReady;
 
     uint32_t pkt[20];
     uint32_t n = 0;
