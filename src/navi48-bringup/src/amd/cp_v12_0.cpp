@@ -460,7 +460,7 @@ cp_release_storage(CPContext &cp)
 uint32_t
 cp_ring_write(CPContext &cp, const uint32_t *src, uint32_t dwords)
 {
-    if (!cp.inited || cp.dev == nullptr || src == nullptr || dwords == 0) return 0;
+    if (!cp.inited || src == nullptr || dwords == 0) return 0;
     if (dwords > cp.ring_size_dwords / 2) {
         CP_LOG("ring_write: %u dwords exceeds half-ring %u",
                dwords, cp.ring_size_dwords / 2);
@@ -474,7 +474,8 @@ cp_ring_write(CPContext &cp, const uint32_t *src, uint32_t dwords)
         nextWptr = (nextWptr + 1) & cp.ring_ptr_mask;
     }
     sysmem_wmb();
-    if (!amdgpu_hdp_flush(*cp.dev)) return 0;
+    // The central kick helper checks HDP before publishing the writeback WPTR.
+    // This routine only stages data and commits the local software pointer.
     cp.wptr = nextWptr;
     return dwords;
 }
@@ -1989,6 +1990,7 @@ cp_ring_fetch_probe(const DeviceContext &dev, CPContext &cp,
             const uint32_t chunk = (left > 64u) ? 64u : left;
             for (uint32_t i = 0; i < chunk; i++) block[i] = nop;
             if (cp_ring_write(cp, block, chunk) != chunk) {
+                cp.wptr = wptr_before;
                 CP_LOG("ring_fetch_probe: ring_write refused %u dwords",
                        chunk);
                 return kIOReturnNoSpace;
@@ -2002,7 +2004,7 @@ cp_ring_fetch_probe(const DeviceContext &dev, CPContext &cp,
     // Drain posted writes so the CP sees the ring contents, then kick.
     amdgpu_hdp_flush(dev);
     kern_return_t r = cp_kick_doorbell(dev, cp);
-    if (r != kIOReturnSuccess) return r;
+    if (r != kIOReturnSuccess) { cp.wptr = wptr_before; return r; }
 
     const uint32_t target = cp.wptr;
     const uint64_t step_us = 100;
@@ -2442,7 +2444,7 @@ cp_kiq_smoke_test(DeviceContext &dev,
     // function and gfx_v12_0_ring_set_wptr_gfx).
     {
         kern_return_t dr = cp_kick_doorbell(dev, cp);
-        if (dr != kIOReturnSuccess) return dr;
+        if (dr != kIOReturnSuccess) { cp.wptr = start_wptr; return dr; }
     }
 
     // (9) Poll the fence slot up to timeout_us in 100 us steps. The
