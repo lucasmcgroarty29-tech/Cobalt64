@@ -865,7 +865,7 @@ uint32_t sdma_ring_write(const DeviceContext &dev, SDMAInstance &inst,
 // Writeback-page accessors (deviation D6) — hide sysmem-vs-VRAM.
 uint32_t sdma_wb_read32(const DeviceContext &dev, const SDMAInstance &inst,
                         uint32_t byte_offset);
-void     sdma_wb_write32(const DeviceContext &dev, const SDMAInstance &inst,
+bool     sdma_wb_write32(const DeviceContext &dev, const SDMAInstance &inst,
                          uint32_t byte_offset, uint32_t value);
 
 // Submit an SDMA COPY_LINEAR + FENCE pair, kick doorbell, poll fence.
