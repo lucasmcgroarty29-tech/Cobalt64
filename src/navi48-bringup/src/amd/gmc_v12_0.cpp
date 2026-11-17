@@ -1730,12 +1730,14 @@ gmc_flush_gpu_tlb(DeviceContext &dev, const GMCContext &gmc,
 {
     (void)gmc;
     if (!hub.inited || !dev.ip.isResolved(hub.ip)) return kIOReturnNotReady;
+    uint32_t vmidBit = 0;
+    if (!gart_checked_vmid_bit(vmid, &vmidBit)) return kIOReturnBadArgument;
 
     // Build the request word via REG_SET_FIELD — same pattern as
     // {mmhub,gfxhub}_v*_get_invalidate_req upstream.
     uint32_t req = 0;
     req = REG_SET_FIELD(req, MMVM_INVALIDATE_ENG0_REQ,
-                        PER_VMID_INVALIDATE_REQ, 1u << vmid);
+                        PER_VMID_INVALIDATE_REQ, vmidBit);
     req = REG_SET_FIELD(req, MMVM_INVALIDATE_ENG0_REQ,
                         FLUSH_TYPE, flush_type & 0x7);
     req = REG_SET_FIELD(req, MMVM_INVALIDATE_ENG0_REQ, INVALIDATE_L2_PTES, 1);
@@ -1759,7 +1761,7 @@ gmc_flush_gpu_tlb(DeviceContext &dev, const GMCContext &gmc,
 
     // Poll the ack bit for this vmid. Upstream loops until usec_timeout
     // (default 100 ms).
-    uint32_t expected = (1u << vmid);
+    uint32_t expected = vmidBit;
     uint32_t value = 0;
     bool acked;
     // build 0.0.528 (; apple/gfx_tlb83.h) — SWITCH 83, read ONCE per call. ON: the request write and the ack wait
