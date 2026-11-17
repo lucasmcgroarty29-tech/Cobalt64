@@ -175,3 +175,11 @@ Until those answers are established, do not implement a generic gmc_unbind() or 
 ## Lifecycle model update
 
 The host-side lifecycle gate now separates writing cleared PTEs, completing the HDP flush, and acknowledging TLB invalidation on every required translation hub. Its tests reject invalidation before the HDP flush, completion before all required hub bits are acknowledged, unknown hub bits, skipped steps, and reuse after quarantine. This remains a contract model only: it cannot establish which hubs or VMIDs a real allocation actually requires, and it does not issue or verify hardware operations.
+
+## Fail-closed TLB acknowledgement changes
+
+The active initialization paths previously ignored the return value from the initial VMID-0 TLB flush on MMHUB and GFXHUB. The GFXHUB readiness path also marked GART ready after a failed GFXHUB flush, and logged-but-continued if the software GART context could not be initialized. These paths now propagate a failed TLB acknowledgement and refuse to publish GART readiness. GMCInit similarly stops if either applicable VMID-0 hub flush fails.
+
+The optional VMFrag self-test also previously ignored VMID-1 invalidation failures before test submissions and after restoring CONTEXT1. It now refuses a test submission if the pre-submit flush fails. If the restore flush fails, it deliberately retains the temporary page-table and data VRAM allocations rather than returning them to the allocator while stale translations may still exist. The result structure records the failed restore and quarantined allocations.
+
+These are source-level fail-closed changes. The native kext has not been built or run on hardware in this environment. The host CI does not compile these IOKit/kernel translation units, so they still require a separate macOS/Xcode build and careful review before any hardware test.
