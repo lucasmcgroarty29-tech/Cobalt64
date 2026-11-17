@@ -8,6 +8,8 @@ on:
       - "src/navi48-bringup/src/amd/gart_range_allocator.*"
       - "src/navi48-bringup/src/amd/gart_mapping_lifecycle.*"
       - "src/navi48-bringup/src/amd/gart_range_bounds.h"
+      - "src/navi48-bringup/src/amd/gmc_v12_0.cpp"
+      - "src/navi48-bringup/src/amd/amdgpu_gart.cpp"
       - "src/navi48-bringup/tests/gart_range_allocator/**"
       - ".github/workflows/gart-host-tests.yml"
   pull_request:
