@@ -137,3 +137,36 @@ audit the full teardown and each persistent mapping owner, then define a GMC
 mapping record that links the aperture interval, host-memory owner, GPU users,
 hub/VMID visibility, and retirement status. Any timeout or uncertain engine state
 must quarantine the interval rather than return it to the allocator.
+
+## Follow-up audit: hub lifetime and mapping visibility
+
+### Hub lifetime is not yet retired during bring-up teardown
+
+The GMC source contains enable paths for MMHUB and GFXHUB, including programming their page-table bases, aperture geometry, VMID configuration and invalidation engines. The inspected amdgpu_init.cpp teardown stops SDMA, CP/MEC and MES, then releases buffers and calls gmc_release_resources().
+
+No inverse GART-disable routine is called from that teardown. In particular, gmc_release_resources() clears software fields and releases mem_scratch and dummy_page, but does not disable the GART contexts, clear their page-table base/enable registers, or invalidate both hubs before releasing those backing resources. This is a concrete teardown gap to resolve before treating unload, reload, or partial bring-up failure as a fully retired mapping context.
+
+This matters beyond ordinary GART buffers: the hubs' protection-fault configuration can reference the dummy page, and the page-table base remains hardware register state until explicitly changed or reset. Stopping command engines is necessary but is not the same as retiring translation contexts.
+
+### Mapping visibility is not a complete bind contract
+
+gmc_bind_existing() and gmc_bind_at() write PTEs and perform an HDP flush. They do not call gmc_flush_gpu_tlb(). The TLB flush routine itself is bounded and returns kIOReturnTimeout when acknowledgement does not arrive, but bind helpers do not make invalidation part of their success contract.
+
+A fresh mapping may not need invalidation if the driver can prove that no GPU ever queried that VA before the PTE was installed. That proof must be explicit: the address may have been used before, a prior invalid PTE may have been cached, or an exact-offset Apple mapping may be updated. For such cases, a successful HDP flush alone does not prove the translation cache has been retired.
+
+Before exposing a generic mapping API, define whether bind must invalidate the relevant hub/VMID, or require the caller to provide a documented precondition proving the VA is fresh. Propagate every TLB timeout and quarantine the interval on uncertainty. Do not silently ignore the result of a flush.
+
+### Separate GARTContext path must remain disabled from integration work
+
+gart_init() resets GARTContext::nextFreeOffset to zero. The live GMC path can reserve the high region for this driver's buffers while Apple owns exact offsets in the low region. Therefore the legacy gart_bind_sysmem()/gart_bind_existing() bump allocator, if called with this context, would begin allocating at the start of the aperture rather than respecting GMC's reserved high interval or Apple's exact-offset ownership.
+
+The inspected bring-up calls gart_init() after GFXHUB enable, but no direct production call to the legacy gart_bind_sysmem(), gart_bind_existing() or gart_unbind() was found in the inspected call-site set. The GMCContext mapping helpers are the confirmed active path. Treat the legacy GART binding API as dormant and unsafe to activate until it has an explicit shared-aperture partition and owner contract.
+
+### Required teardown design questions
+
+1. What is the safe order for stopping every GPU client, disabling VMID contexts on both hubs, invalidating each relevant VMID on both hubs, and only then freeing system pages and page-table resources?
+2. Which registers must be restored or disabled on partial bring-up failure, where only one hub may have been enabled?
+3. Can Apple-owned contexts or display-related translations still be active while this kext is unloading? If so, the kext must not globally disable or rewrite those contexts without an ownership handshake.
+4. What reset/reload path guarantees stale hardware translations cannot refer to a previous boot's freed host pages?
+
+Until those answers are established, do not implement a generic gmc_unbind() or allocator reuse path. A whole-context teardown and an individual mapping retirement are separate operations and need separate contracts.
