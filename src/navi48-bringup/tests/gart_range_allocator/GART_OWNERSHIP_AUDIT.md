@@ -656,3 +656,8 @@ RLC no longer marks its clear-state buffer populated until the CSB HDP drain suc
 The SRBM self-test now checks the HDP drain after staging an indirect-buffer packet. If that drain is unavailable, it stops the target's remaining legs, restores the register it temporarily cleared, and retains the IB allocation rather than freeing memory whose staged writes may still be pending. Its initial IB clear is also checked and quarantines the allocation on failure.
 
 The VMID-specific IB copy helper checks the drain before publishing an INDIRECT_BUFFER packet. VMFrag's caller treats any non-successful helper result conservatively: it skips readback and later legs, and retains the table/data backing while leaving CONTEXT1 stable. The standalone VRAM-copy test likewise checks its initial source/destination staging drain and retains both allocations if visibility cannot be acknowledged.
+
+
+## SDMA submission-state quarantine (2026-11-17)
+
+`SDMAInstance` now carries a fail-stop `submission_uncertain` state. A failed ring-data HDP drain, partial/failed writeback WPTR staging, or failed post-WPTR HDP drain marks the instance uncertain. Queue-0 and Queue-1 kick paths refuse further publication, and `sdma_ring_write` refuses further packet staging. The flag is intentionally not cleared by ordinary queue resume/reallocation; only a fresh device initialisation can establish a clean state. This prevents a later successful flush or unrelated submission from accidentally publishing stale ring contents or a partially updated polled WPTR.
