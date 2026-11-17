@@ -2650,9 +2650,10 @@ cp_init_full(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
     // command processor run our microcode".
     kern_return_t pr = cp_ring_fetch_probe(dev, cp, /*nops=*/16,
                                            /*timeout_us=*/500000);
-    if (pr != kIOReturnSuccess)
-        CP_LOG("cp_init_full: ring fetch probe FAILED %#x — the CP is not "
-               "consuming the GFX ring; PM4Test will time out", pr);
+    if (pr != kIOReturnSuccess) {
+        CP_LOG("cp_init_full: ring fetch probe FAILED %#x — CP completion is uncertain; refusing to report the legacy ring ready", pr);
+        if (cp.submission_uncertain) return pr;
+    }
 
     CP_LOG("CP ready (legacy CP_RB0_* path): GFX ring active at doorbell %u "
            "(ring_mc=%#llx), MEC pipes active, caches_configured=%d, "
