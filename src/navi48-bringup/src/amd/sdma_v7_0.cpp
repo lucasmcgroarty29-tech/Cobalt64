@@ -1072,6 +1072,7 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                             /*timeout_us=*/200000ull, &elapsed, &last);
         t.doorbell_ok  = (r == kIOReturnSuccess);
         queueCompletionUncertain = !t.doorbell_ok;
+        if (queueCompletionUncertain) inst.submission_uncertain = true;
         t.doorbell_us  = elapsed;
         t.fence_last   = last;
         SDMA_LOG("q1-selftest: SDMA%u QUEUE%u doorbell dword %#x leg %s — fence "
@@ -1100,6 +1101,7 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                                 /*timeout_us=*/200000ull, &elapsed, &last);
             t.mmio_ok = (r == kIOReturnSuccess);
             queueCompletionUncertain = !t.mmio_ok;
+            if (queueCompletionUncertain) inst.submission_uncertain = true;
         }
         t.mmio_us    = elapsed;
         t.fence_last = last;
@@ -1134,6 +1136,7 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     // Do not recycle the ring unless both queue-enable bits read back clear.
     const kern_return_t disableResult = sdma_disable_external_queue(dev, inst, queue);
     if (disableResult != kIOReturnSuccess) {
+        inst.submission_uncertain = true;
         SDMA_LOG("q1-selftest: queue disable was not acknowledged; retaining scratch ring %#llx",
                  (unsigned long long)ring.gpu_va);
         if (out) *out = t;
@@ -1280,6 +1283,7 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
                                             fence_value, /*timeout_us=*/200000ull,
                                             &elapsed, &last);
     tr.fenced[leg]   = (r == kIOReturnSuccess);
+    if (!tr.fenced[leg]) inst.submission_uncertain = true;
     tr.readback[leg] = RREG32(dev, tr.reg_dw);
     tr.landed[leg]   = tr.fenced[leg] && (tr.readback[leg] == tr.value);
 
