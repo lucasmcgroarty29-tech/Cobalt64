@@ -68,11 +68,14 @@ static inline uint32_t SOC15_REG_OFFSET_BIDX(const DeviceContext &ctx, IPBlock b
 }
 
 static inline uint32_t RREG32(const DeviceContext &ctx, uint32_t reg) {
-    if (!ctx.rmmio || (size_t)reg * 4 + 4 > ctx.rmmioSize) return 0xFFFFFFFFu;
+    const uint64_t byte_offset = (uint64_t)reg * 4ULL;
+    if (!ctx.rmmio || !amdgpu_range_fits(ctx.rmmioSize, byte_offset, 4))
+        return 0xFFFFFFFFu;
     return ctx.rmmio[reg];
 }
 static inline void WREG32(const DeviceContext &ctx, uint32_t reg, uint32_t value) {
-    if (!ctx.rmmio || (size_t)reg * 4 + 4 > ctx.rmmioSize) return;
+    const uint64_t byte_offset = (uint64_t)reg * 4ULL;
+    if (!ctx.rmmio || !amdgpu_range_fits(ctx.rmmioSize, byte_offset, 4)) return;
     ctx.rmmio[reg] = value;
 }
 static inline uint32_t RREG32_abs(const DeviceContext &ctx, uint32_t reg) { return RREG32(ctx, reg); }
