@@ -2825,10 +2825,10 @@ static uint32_t fc_staging_bind() {
 		N48LOG("fastcopy63: STAGING REFUSED - no physically contiguous %u-byte system-memory buffer", N48_FC_STAGING_BYTES);
 		return 3u;
 	}
-	gFcBumpBefore = gBringup.gmc.gart_bump_offset;
+	gFcBumpBefore = __atomic_load_n(&gBringup.gmc.gart_bump_offset, __ATOMIC_ACQUIRE);
 	uint64_t mc = 0;
 	const kern_return_t kr = amdgpu::gmc_bind_existing(*gBringup.dev, gBringup.gmc, gFcStaging.bus, N48_FC_STAGING_BYTES, &mc);
-	gFcBumpAfter = gBringup.gmc.gart_bump_offset;
+	gFcBumpAfter = __atomic_load_n(&gBringup.gmc.gart_bump_offset, __ATOMIC_ACQUIRE);
 	if (kr != KERN_SUCCESS || !mc || mc == gBringup.gmc.gart_start) {
 		N48LOG("fastcopy63: STAGING REFUSED - gmc_bind_existing %#x, MC %#llx (GART page 0 is Apple's write-back page); the buffer "
 		       "is kept, unbound", (unsigned)kr, (unsigned long long)mc);
@@ -3024,10 +3024,10 @@ static uint32_t fc89_rb_bind() {
 		N48LOG("fastcopy89: READ-BACK BUFFER REFUSED - no physically contiguous %u-byte system-memory buffer", N48_FC_STAGING_BYTES);
 		return 3u;
 	}
-	const uint64_t b0 = gBringup.gmc.gart_bump_offset;
+	const uint64_t b0 = __atomic_load_n(&gBringup.gmc.gart_bump_offset, __ATOMIC_ACQUIRE);
 	uint64_t mc = 0;
 	const kern_return_t kr = amdgpu::gmc_bind_existing(*gBringup.dev, gBringup.gmc, gFc89Rb.bus, N48_FC_STAGING_BYTES, &mc);
-	const uint64_t b1 = gBringup.gmc.gart_bump_offset;
+	const uint64_t b1 = __atomic_load_n(&gBringup.gmc.gart_bump_offset, __ATOMIC_ACQUIRE);
 	if (kr != KERN_SUCCESS || !mc || mc == gBringup.gmc.gart_start) {
 		N48LOG("fastcopy89: READ-BACK BUFFER REFUSED - gmc_bind_existing %#x, MC %#llx; the buffer is kept, unbound", (unsigned)kr,
 		       (unsigned long long)mc);
