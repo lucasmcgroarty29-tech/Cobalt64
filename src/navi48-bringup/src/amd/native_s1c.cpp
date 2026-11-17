@@ -1197,8 +1197,18 @@ IOReturn n1c_bo_create(const N1cRef &ref, const n48n_gem_create_in *in, uint64_t
             if (got) {
                 b.kind = kBoVis; b.a = a; b.mc = a.gpu_va;
                 bar0_memset_vram(dev, a.gpu_va - gCtx->gmc.vram_start, 0, a.size);
-                amdgpu_hdp_flush(dev);
-                placed = N48N_GEM_DOMAIN_VRAM; bits = N48N_PLACED_CPU_MAPPABLE | N48N_PLACED_ZEROED;
+                if (!amdgpu_hdp_flush(dev)) {
+                    // The allocation has not been published to the caller. Keep it
+                    // permanently owned rather than returning potentially dirty VRAM
+                    // to the pool; do not claim that the BO is zero-initialised.
+                    b.pinLeak = 1u;
+                    rc = kIOReturnNotReady;
+                    bits = N48N_PLACED_CPU_MAPPABLE;
+                    N1C_LOG("BoCreate: HDP flush unavailable after zeroing; BO %u backing quarantined and ZEROED flag withheld", h);
+                } else {
+                    bits = N48N_PLACED_CPU_MAPPABLE | N48N_PLACED_ZEROED;
+                }
+                placed = N48N_GEM_DOMAIN_VRAM;
                 if (n48native::g4::appvis_counts(appsNow, s->ws, true)) { b.visCounted = 1u; gVisOthers += p.size; }
             } else if (hiDone || (p.hiOk && gCtx->gmc.vram_alloc_hi.is_inited() && gCtx->gmc.vram_alloc_hi.alloc(p.size, p.align, &a))) {
                 b.kind = kBoHi; b.a = a; b.mc = a.gpu_va;
