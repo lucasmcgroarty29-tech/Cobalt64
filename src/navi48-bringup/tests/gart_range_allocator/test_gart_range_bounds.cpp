@@ -126,6 +126,7 @@ int main(void)
 {
     test_page_spans();
     test_ranges_and_pte_bounds();
+    test_atomic_bump_reservations();
     test_bus_and_add_overflow();
     puts("GART checked bounds: 4 test groups passed");
     return 0;
