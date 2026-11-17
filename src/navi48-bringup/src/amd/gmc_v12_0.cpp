@@ -2228,7 +2228,7 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     t.leaf_va   = leaf_va;
 
     // ---- build the table -------------------------------------------------
-    auto build_table = [&](bool invertedPolarity) {
+    auto build_table = [&](bool invertedPolarity) -> bool {
         bar0_memset_vram(dev, tbl_off, 0, kVMFragTableBytes);
         const uint64_t ptrBit  = invertedPolarity ? PTEFlags::IS_PTE : 0ull;
         const uint64_t pteBit  = invertedPolarity ? 0ull : PTEFlags::IS_PTE;
@@ -2247,7 +2247,10 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
             if (!pteBit) e &= ~PTEFlags::IS_PTE;
             WBAR0_64(dev, tbl_off + sub_off + (uint64_t)i * 8, e);
         }
-        amdgpu_hdp_flush(dev);
+        if (!amdgpu_hdp_flush(dev)) {
+            GMC_LOG("vmfrag: HDP flush unavailable after page-table writes — refusing all legs");
+            return false;
+        }
         GMC_LOG("vmfrag: table at mc %#llx (pa %#llx)%s — root[0]=%#018llx "
                 "L1[%u]=%#018llx L1[%u]=%#018llx sub[0]=%#018llx sub[1]=%#018llx "
                 "sub[2]=%#018llx (sub-table at +%#llx)",
@@ -2264,6 +2267,7 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                 (unsigned long long)RBAR0_64(dev, tbl_off + sub_off + 8),
                 (unsigned long long)RBAR0_64(dev, tbl_off + sub_off + 16),
                 (unsigned long long)sub_off);
+        return true;
     };
 
     // ---- CONTEXT1: save, program, and (at the end) restore ---------------
@@ -2346,29 +2350,37 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     };
 
     // ---- leg (a): the 16-entry sub-table --------------------------------
-    build_table(/*invertedPolarity*/ false);
-    t.sub_ok = run_leg("(a) SUB-TABLE", sub_va + 0x2000, data_off + 0x12000,
-                       sub_va + 0x0000, sub_va + 0x1000,
-                       data_off + 0x10000, data_off + 0x11000,
-                       0x5B7AB1E0u, 0xA1, &t.sub_bad);
-    if (!t.sub_ok) {
+    bool tableReady = build_table(/*invertedPolarity*/ false);
+    if (tableReady) {
+        t.sub_ok = run_leg("(a) SUB-TABLE", sub_va + 0x2000, data_off + 0x12000,
+                           sub_va + 0x0000, sub_va + 0x1000,
+                           data_off + 0x10000, data_off + 0x11000,
+                           0x5B7AB1E0u, 0xA1, &t.sub_bad);
+    }
+    if (tableReady && !t.sub_ok) {
         GMC_LOG("vmfrag: leg (a) failed with pointer P=0 / PTE P=1 — retrying ONCE "
                 "with the inverse polarity, which is the one rule the the reviewer pass "
                 "could not settle from Apple's code");
-        build_table(/*invertedPolarity*/ true);
-        t.inverted = true;
-        t.sub_ok = run_leg("(a') SUB-TABLE inverse-P", sub_va + 0x2000,
-                           data_off + 0x12000, sub_va + 0x0000, sub_va + 0x1000,
-                           data_off + 0x10000, data_off + 0x11000,
-                           0x5B7AB1E1u, 0xA2, &t.sub_bad);
-        if (!t.sub_ok) build_table(/*invertedPolarity*/ false);   // leg (b) wants the normal one
+        tableReady = build_table(/*invertedPolarity*/ true);
+        if (tableReady) {
+            t.inverted = true;
+            t.sub_ok = run_leg("(a') SUB-TABLE inverse-P", sub_va + 0x2000,
+                               data_off + 0x12000, sub_va + 0x0000, sub_va + 0x1000,
+                               data_off + 0x10000, data_off + 0x11000,
+                               0x5B7AB1E1u, 0xA2, &t.sub_bad);
+            if (!t.sub_ok) tableReady = build_table(/*invertedPolarity*/ false);
+        }
     }
 
     // ---- leg (b): the 64 KiB leaf ---------------------------------------
-    t.leaf_ok = run_leg("(b) 64 KiB LEAF", leaf_va + 0x2000, data_off + 0x2000,
-                        leaf_va + 0x0000, leaf_va + 0x1000,
-                        data_off + 0x0000, data_off + 0x1000,
-                        0x64C0FFEEu, 0xB1, &t.leaf_bad);
+    if (tableReady) {
+        t.leaf_ok = run_leg("(b) 64 KiB LEAF", leaf_va + 0x2000, data_off + 0x2000,
+                            leaf_va + 0x0000, leaf_va + 0x1000,
+                            data_off + 0x0000, data_off + 0x1000,
+                            0x64C0FFEEu, 0xB1, &t.leaf_bad);
+    } else {
+        GMC_LOG("vmfrag: table staging was not acknowledged; leg (b) and optional leg (c) skipped");
+    }
     t.fault_walker = (t.fault_lo >> 1) & 7u;
 
     // ---- leg (c), M4-WS-VMID-VALID: the SAME 64 KiB leaf copy on a base WITHOUT the VALID bit ----
