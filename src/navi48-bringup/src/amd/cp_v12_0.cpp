@@ -430,7 +430,7 @@ cp_alloc_storage(DeviceContext &dev, GMCContext &gmc, CPContext &cp)
 void
 cp_release_storage(CPContext &cp)
 {
-    if (cp.submission_uncertain || cp.kgq_mapped) {
+    if (cp.submission_uncertain || cp.kgq_mapped || cp.legacy_ring_armed) {
         CP_LOG("storage release refused — CP command completion or MES mapping is still active/uncertain; ring, MQD and WB backing remain quarantined");
         return;
     }
@@ -1174,7 +1174,7 @@ cp_config_gfx_rs64(DeviceContext &dev, CPContext &cp)
 kern_return_t
 cp_hqd_program(const DeviceContext &dev, CPContext &cp)
 {
-    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain || cp.legacy_ring_armed) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
 
     CP_LOG("cp_hqd_program: GC base[0]=%#x base[1]=%#x ring_mc=%#llx "
@@ -1309,6 +1309,8 @@ cp_hqd_program(const DeviceContext &dev, CPContext &cp)
         cp_wreg_logged(dev, "GRBM_GFX_CNTL (switch_pipe PIPE_ID0, 2nd)",
                        grbm_reg, v);
     }
+
+    cp.legacy_ring_armed = true;
 
     // gfx_v12_0.c:2805 — cp_gfx_resume's last act is cp_gfx_start(adev).
     // CP_MAX_CONTEXT / CP_DEVICE_ID / the CP unhalt used to live here;
@@ -2520,7 +2522,7 @@ kern_return_t
 cp_init_full(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
              bool legacy_rb)
 {
-    if (cp.submission_uncertain) return kIOReturnNotReady;
+    if (cp.submission_uncertain || cp.legacy_ring_armed) return kIOReturnNotReady;
     kern_return_t r = cp_alloc_storage(dev, gmc, cp);
     if (r != kIOReturnSuccess) return r;
 

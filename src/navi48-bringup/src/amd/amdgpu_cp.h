@@ -638,6 +638,8 @@ struct CPContext {
     // ADD_QUEUE(map_legacy_kq=1). 0.0.16.
     bool      gfx_mqd_inited   { false };  // cp_gfx_mqd_init filled mqd_cpu
     bool      kgq_mapped       { false };  // MES acked ADD_QUEUE for me0/pipe0/queue0
+    // Legacy CP_RB0 path has RB_ACTIVE + doorbell armed; retain backing until reset.
+    bool      legacy_ring_armed { false };
     bool      ring_test_passed { false };  // cp_ring_test_scratch: SET_UCONFIG_REG landed
     uint32_t  ring_test_value  { 0 };      // SCRATCH_REG0 at the end of that test
 };

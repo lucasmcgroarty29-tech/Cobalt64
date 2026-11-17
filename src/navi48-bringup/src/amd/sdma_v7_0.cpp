@@ -324,8 +324,8 @@ void
 sdma_release_storage(GMCContext &gmc, SDMAInstance &inst)
 {
     if (!inst.inited) return;
-    if (inst.submission_uncertain) {
-        SDMA_LOG("instance %u: release_storage refused — DMA ownership is uncertain; ring and writeback backing remain quarantined",
+    if (inst.submission_uncertain || inst.enabled) {
+        SDMA_LOG("instance %u: release_storage refused — DMA ownership is uncertain or queue remains enabled; ring and writeback backing remain quarantined",
                  inst.instance);
         return;
     }
