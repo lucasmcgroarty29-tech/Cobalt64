@@ -42,7 +42,7 @@ bool gart_lifecycle_begin_retire(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_ptes_cleared(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_hdp_flushed(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_note_tlb_invalidated(GARTMappingLifecycle *lifecycle,
-                                         uint32_t hub_mask);
+                                         uint32_t context_mask);
 bool gart_lifecycle_retire_complete(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_quarantine(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_valid(const GARTMappingLifecycle *lifecycle);
