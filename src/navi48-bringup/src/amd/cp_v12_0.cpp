@@ -1174,7 +1174,7 @@ cp_config_gfx_rs64(DeviceContext &dev, CPContext &cp)
 kern_return_t
 cp_hqd_program(const DeviceContext &dev, CPContext &cp)
 {
-    if (!cp.inited) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
 
     CP_LOG("cp_hqd_program: GC base[0]=%#x base[1]=%#x ring_mc=%#llx "
@@ -2516,6 +2516,7 @@ kern_return_t
 cp_init_full(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
              bool legacy_rb)
 {
+    if (cp.submission_uncertain) return kIOReturnNotReady;
     kern_return_t r = cp_alloc_storage(dev, gmc, cp);
     if (r != kIOReturnSuccess) return r;
 

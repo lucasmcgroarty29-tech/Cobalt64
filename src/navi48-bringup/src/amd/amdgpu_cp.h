@@ -855,7 +855,7 @@ kern_return_t cp_set_doorbell_range(const DeviceContext &dev,
 // Publish the software wptr into the write-back page and ring the GFX
 // ring's doorbell at BAR2 + doorbell_index * 8 (GFX12 stride).
 kern_return_t cp_kick_doorbell(const DeviceContext &dev,
-                               const CPContext &cp);
+                               CPContext &cp);
 
 // End-to-end test: emit NOP+RELEASE_MEM, kick doorbell, poll fence.
 // Returns kIOReturnSuccess if the fence value materialised at
