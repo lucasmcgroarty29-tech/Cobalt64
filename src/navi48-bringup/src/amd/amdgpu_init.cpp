@@ -643,10 +643,16 @@ kern_return_t run_stage(BringupContext &ctx, BringupStage s) {
             if (r != kIOReturnSuccess) { dump_failure_state(ctx, "PM4Test/map_kgq"); return r; }
             r = cp_gfx_start(dev, ctx.cp, /*legacy_unhalt=*/false);
             if (r != kIOReturnSuccess) return r;
-            // Diagnostic (non-fatal by itself): 16 NOPs + doorbell, does rptr move?
+            // Diagnostic: 16 NOPs + doorbell, does rptr move? A failed
+            // preflight can be retried by later tests, but a published command
+            // without a fence makes the CP ring fail-stop for this boot.
             const kern_return_t pr = cp_ring_fetch_probe(dev, ctx.cp, 16, 500000);
             INIT_LOG("PM4Test: ring fetch probe %s (kr=%#x)",
                      pr == kIOReturnSuccess ? "PASSED — the CP consumes the GFX ring" : "did not see the CP fetch", pr);
+            if (ctx.cp.submission_uncertain) {
+                dump_failure_state(ctx, "PM4Test/ring_fetch_probe");
+                return pr;
+            }
         }
 
         // (a0) gfx_v12_0_ring_test_ring: SET_UCONFIG_REG SCRATCH_REG0 <- 0xDEADBEEF, poll the
