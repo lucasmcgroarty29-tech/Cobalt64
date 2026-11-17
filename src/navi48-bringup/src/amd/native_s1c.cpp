@@ -959,9 +959,11 @@ void n1c_close(const N1cRef &ref, const char *how) {
             for (uint32_t h = 1; h < N48N_MAX_BOS; h++) if (s->boUsed[h]) bo_release(s, h, kRelClosing);
             pt_release_blocks(s);   // into the reserve, not vram_alloc
         }
-        N1C_LOG("client closed (%s): slot %u VMID %u: %u BOs (%llu MiB VRAM, %llu MiB GTT), %u PT pages, %llu seqs, freed", how, s->slot, s->vmid, nBos,
-                (unsigned long long)(vramB >> 20), (unsigned long long)(gttB >> 20), ptPages, (unsigned long long)seqs);
-        if (nHost != 0u) N1C_LOG("client closed (%s): %u host imports (%llu KiB) unmapped, then completed and released", how, nHost, (unsigned long long)(hostB >> 10));   // 0.0.612
+        if (!leak) {
+            N1C_LOG("client closed (%s): slot %u VMID %u: %u BOs (%llu MiB VRAM, %llu MiB GTT), %u PT pages, %llu seqs, freed", how, s->slot, s->vmid, nBos,
+                    (unsigned long long)(vramB >> 20), (unsigned long long)(gttB >> 20), ptPages, (unsigned long long)seqs);
+            if (nHost != 0u) N1C_LOG("client closed (%s): %u host imports (%llu KiB) unmapped, then completed and released", how, nHost, (unsigned long long)(hostB >> 10));
+        }   // 0.0.612
     } else {
         // HUNG (or this slot's own work not proven retired): nothing the GPU might still read is freed; the context stays as it is, and the slot is DEAD.
         N1C_LOG("client closed (%s): slot %u VMID %u: %u BOs (%llu MiB VRAM, %llu MiB GTT), %u PT pages, %llu seqs, LEAKED (HUNG)", how, s->slot, s->vmid, nBos,
