@@ -170,3 +170,8 @@ The inspected bring-up calls gart_init() after GFXHUB enable, but no direct prod
 4. What reset/reload path guarantees stale hardware translations cannot refer to a previous boot's freed host pages?
 
 Until those answers are established, do not implement a generic gmc_unbind() or allocator reuse path. A whole-context teardown and an individual mapping retirement are separate operations and need separate contracts.
+
+
+## Lifecycle model update
+
+The host-side lifecycle gate now separates writing cleared PTEs, completing the HDP flush, and acknowledging TLB invalidation on every required translation hub. Its tests reject invalidation before the HDP flush, completion before all required hub bits are acknowledged, unknown hub bits, skipped steps, and reuse after quarantine. This remains a contract model only: it cannot establish which hubs or VMIDs a real allocation actually requires, and it does not issue or verify hardware operations.
