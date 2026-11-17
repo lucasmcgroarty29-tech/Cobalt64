@@ -316,3 +316,16 @@ protects the entire reserved HIGH interval. In legacy LOW mode
 the already-consumed `[0, gart_bump_offset)` interval. Host tests cover overlap,
 reverse-order overlap, adjacency and invalid ranges. This is still an
 unintegrated source-level correction pending native build and hardware testing.
+
+
+## GART inspection helper bounds (2026-11-17)
+
+The read-only PTE inspection path also used `gart_start + gart_size` and
+`page_table_offset + index * 8` before validating the resulting address.
+It now validates the aperture-relative offset without an overflowing end
+addition, checks the PTE index and absolute VRAM byte range with the shared
+helper, and verifies the final 8-byte BAR0 span. The multi-page GART read/write
+helpers now validate the entire requested range against the aperture and
+reject an absolute end-address overflow before iterating page by page.
+These checks do not map or modify GPU memory; they only make the existing
+inspection and transfer guards fail closed on malformed ranges.
