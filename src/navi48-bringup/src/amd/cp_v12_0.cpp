@@ -1455,7 +1455,8 @@ cp_dump_gfx_hqd(const DeviceContext &dev, const char *where)
 kern_return_t
 cp_gfx_mqd_init(const DeviceContext &dev, CPContext &cp)
 {
-    if (!cp.inited || cp.mqd_cpu == nullptr || cp.mqd_bus == 0)
+    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped ||
+        cp.mqd_cpu == nullptr || cp.mqd_bus == 0)
         return kIOReturnNotReady;
     if (cp.mqd_sys.size < GfxMqd::kDwords * 4u) {
         CP_LOG("gfx_mqd_init: MQD buffer is %llu bytes, v12_gfx_mqd needs %u",
@@ -1590,7 +1591,8 @@ kern_return_t
 cp_gfx_mqd_init_external(const DeviceContext &dev, CPContext &cp,
                          CPExternalGfxQueue &q)
 {
-    if (!cp.inited || cp.mqd_cpu == nullptr || cp.mqd_bus == 0)
+    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped ||
+        cp.mqd_cpu == nullptr || cp.mqd_bus == 0)
         return kIOReturnNotReady;
     if (cp.mqd_sys.size < GfxMqd::kDwords * 4u) {
         CP_LOG("gfx_mqd_external: MQD buffer is %llu bytes, v12_gfx_mqd needs %u",
@@ -1740,7 +1742,7 @@ cp_gfx_mqd_init_external(const DeviceContext &dev, CPContext &cp,
 kern_return_t
 cp_map_gfx_kgq_mes(const DeviceContext &dev, CPContext &cp, MESContext &mes)
 {
-    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped) return kIOReturnNotReady;
     if (!cp.gfx_mqd_inited) {
         CP_LOG("map_gfx_kgq_mes: MQD not initialised — call cp_gfx_mqd_init first");
         return kIOReturnNotReady;
@@ -2736,7 +2738,7 @@ cp_compute_queue_release(GMCContext &gmc, ComputeQueue &cq)
 kern_return_t
 cp_compute_mqd_init(const DeviceContext &dev, ComputeQueue &cq)
 {
-    if (!cq.inited || cq.submission_uncertain || cq.mqd_cpu == nullptr) return kIOReturnNotReady;
+    if (!cq.inited || cq.submission_uncertain || cq.mapped || cq.mqd_cpu == nullptr) return kIOReturnNotReady;
     namespace M = ComputeMqdOff;
 
     uint32_t *m = static_cast<uint32_t *>(cq.mqd_cpu);
@@ -2844,7 +2846,7 @@ cp_compute_mqd_init(const DeviceContext &dev, ComputeQueue &cq)
 kern_return_t
 cp_compute_queue_map_mes(const DeviceContext &dev, ComputeQueue &cq, MESContext &mes)
 {
-    if (!cq.inited || cq.submission_uncertain) return kIOReturnNotReady;
+    if (!cq.inited || cq.submission_uncertain || cq.mapped) return kIOReturnNotReady;
     if (!mes.pipe[0].inited || !mes.pipe[0].enabled) {
         CP_LOG("compute_queue_map: the MES scheduler is not running");
         return kIOReturnNotReady;
