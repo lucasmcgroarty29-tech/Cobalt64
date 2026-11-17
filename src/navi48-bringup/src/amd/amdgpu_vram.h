@@ -83,6 +83,9 @@ public:
 
     void init(uint64_t base, uint64_t size, void *cpu_base = nullptr) {
         ScopedLock guard(*this);
+        // Reinitialising a live pool would orphan outstanding allocations
+        // and make their addresses available for reuse. Refuse that reset.
+        if (m_inited && m_alloc_count != 0) return;
         m_inited = false;
         m_base = base;
         m_size = size;
