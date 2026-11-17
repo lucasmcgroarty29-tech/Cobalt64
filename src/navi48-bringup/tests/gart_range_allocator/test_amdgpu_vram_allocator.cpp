@@ -99,6 +99,33 @@ static void test_reject_out_of_range_free(void)
     assert(a.bytes_used() == 0);
 }
 
+static void test_reject_partial_and_forged_frees(void)
+{
+    VRAMBumpAllocator a;
+    a.init(0x380000ULL, 0x20000ULL);
+    VRAMAllocation live{};
+    assert(a.alloc(0x8000, 0x4000, &live));
+    assert(live.size == 0x8000);
+
+    // A free-list-only allocator could accept this aligned half-allocation:
+    // it doesn't overlap the current free range, but it isn't an issued BO.
+    VRAMAllocation partial = live;
+    partial.size = 0x4000;
+    a.free(partial);
+    assert(a.bytes_used() == 0x8000);
+    assert(a.bytes_free() == 0x18000);
+
+    VRAMAllocation forged = live;
+    forged.gpu_va += 0x4000;
+    forged.size = 0x4000;
+    a.free(forged);
+    assert(a.bytes_used() == 0x8000);
+
+    a.free(live);
+    assert(a.bytes_used() == 0);
+    assert(a.bytes_free() == 0x20000);
+}
+
 static void test_concurrent_allocations_and_frees(void)
 {
     constexpr uint32_t kThreads = 8;
@@ -149,7 +176,8 @@ int main(void)
     test_init_and_allocation_guards();
     test_coalescing_and_double_free();
     test_reject_out_of_range_free();
+    test_reject_partial_and_forged_frees();
     test_concurrent_allocations_and_frees();
-    puts("VRAM allocator: 4 test groups passed");
+    puts("VRAM allocator: 5 test groups passed");
     return 0;
 }
