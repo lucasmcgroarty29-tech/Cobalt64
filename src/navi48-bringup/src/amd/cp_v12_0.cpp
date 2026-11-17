@@ -2907,21 +2907,29 @@ cp_compute_submit_ib(const DeviceContext &dev, ComputeQueue &cq, uint64_t ib_gpu
     pkt[n++] = 0;       // data_hi (the fence counter is 32-bit)
     pkt[n++] = 0;       // trailing dword required by count = 6
 
+    if (dev.bar2 == nullptr) return kIOReturnNotAttached;
     auto *ring = static_cast<uint32_t *>(cq.ring_cpu);
+    const uint32_t startWptr = cq.wptr;
+    uint32_t nextWptr = startWptr;
     for (uint32_t i = 0; i < n; i++) {
-        ring[cq.wptr] = pkt[i];
-        cq.wptr = (cq.wptr + 1) & cq.ring_ptr_mask;
+        ring[nextWptr] = pkt[i];
+        nextWptr = (nextWptr + 1) & cq.ring_ptr_mask;
     }
 
-    const uint64_t wptr64 = cq.wptr;
+    const uint64_t wptr64 = nextWptr;
     *reinterpret_cast<volatile uint64_t *>(
         static_cast<uint8_t *>(cq.wb_cpu) + kCPWBOffsetWptr) = wptr64;
     sysmem_wmb();
     if (!amdgpu_hdp_flush(dev)) {
+        // Restore the CPU-visible shadow and leave cq.wptr unchanged. The staged
+        // ring dwords are outside the published range and will be overwritten.
+        *reinterpret_cast<volatile uint64_t *>(
+            static_cast<uint8_t *>(cq.wb_cpu) + kCPWBOffsetWptr) = startWptr;
+        sysmem_wmb();
         CP_LOG("compute submit refused: HDP flush window unavailable; queue was not doorbelled");
         return kIOReturnNotReady;
     }
-    if (dev.bar2 == nullptr) return kIOReturnNotAttached;
+    cq.wptr = nextWptr;
     WDOORBELL64(dev, (uint64_t)cq.doorbell_index * kCPDoorbellStride, wptr64);
 
     if (out_fence) *out_fence = fence;
