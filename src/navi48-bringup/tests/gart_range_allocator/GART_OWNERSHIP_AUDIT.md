@@ -623,3 +623,10 @@ The VMFrag table builder now returns a status and refuses to run either sub-tabl
 ## Queue-1 scratch-ring failure cleanup (2026-11-17)
 
 The Queue-1 self-test now refuses to program the external queue if its fence writeback slot cannot be staged or if the scratch-ring HDP drain fails. In either case it retains the scratch-ring allocation rather than returning memory whose pending BAR0 writes may not have been acknowledged. The test reports NotReady and leaves QUEUE1 unprogrammed.
+
+
+## Unconfirmed DMA completion and scratch-allocation ownership (2026-11-17)
+
+The SDMA VRAM-copy test no longer reads or frees source/destination allocations after a non-successful fence wait; a failed wait does not prove the engine has stopped accessing them, so both ranges are retained. The multi-case VRAM sweep similarly aborts and retains its whole region when a copy does not complete, or when an HDP staging/readback acknowledgement is unavailable.
+
+The VMFrag diagnostic now treats any non-successful SDMA IB completion as uncertain ownership: it skips readback, does not rewrite the page table for a polarity retry or later leg, restores CONTEXT1, and retains the table/data allocations even if the restore TLB invalidation succeeds. A failed restore invalidation continues to retain the allocations as before. This is deliberately conservative until a positively acknowledged queue reset can prove the engine no longer references the ranges.
