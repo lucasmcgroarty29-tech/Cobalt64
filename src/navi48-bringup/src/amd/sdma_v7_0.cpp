@@ -860,10 +860,15 @@ sdma_disable_external_queue(const DeviceContext &dev, const SDMAInstance &inst,
     ib_cntl = REG_SET_FIELD(ib_cntl, SDMA0_SDMA_QUEUE0_IB_CNTL, IB_ENABLE, 0);
     WREG32(dev, q1(R.QUEUE0_RB_CNTL), rb_cntl);
     WREG32(dev, q1(R.QUEUE0_IB_CNTL), ib_cntl);
-    SDMA_LOG("SDMA%u QUEUE%u: DISABLED — RB_CNTL=%#010x IB_CNTL=%#010x; the engine "
-             "fetches nothing from this queue. QUEUE0 untouched.",
-             inst.instance, queue, rb_cntl, ib_cntl);
-    return kIOReturnSuccess;
+    const uint32_t rb_check = RREG32(dev, q1(R.QUEUE0_RB_CNTL));
+    const uint32_t ib_check = RREG32(dev, q1(R.QUEUE0_IB_CNTL));
+    const bool disabled =
+        REG_GET_FIELD(rb_check, SDMA0_SDMA_QUEUE0_RB_CNTL, RB_ENABLE) == 0 &&
+        REG_GET_FIELD(ib_check, SDMA0_SDMA_QUEUE0_IB_CNTL, IB_ENABLE) == 0;
+    SDMA_LOG("SDMA%u QUEUE%u: disable %s — RB_CNTL=%#010x IB_CNTL=%#010x; QUEUE0 untouched.",
+             inst.instance, queue, disabled ? "acknowledged" : "NOT ACKNOWLEDGED",
+             rb_check, ib_check);
+    return disabled ? kIOReturnSuccess : kIOReturnNotReady;
 }
 
 //------------------------------------------------------------------
@@ -1126,8 +1131,14 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
              regs.rb_wptr, regs.doorbell, regs.doorbell_offset,
              (doorbell_index << 2) & 0x0FFFFFFCu, doorbell_index);
 
-    // Leave nothing armed: disable the queue, free the scratch ring.
-    (void)sdma_disable_external_queue(dev, inst, queue);
+    // Do not recycle the ring unless both queue-enable bits read back clear.
+    const kern_return_t disableResult = sdma_disable_external_queue(dev, inst, queue);
+    if (disableResult != kIOReturnSuccess) {
+        SDMA_LOG("q1-selftest: queue disable was not acknowledged; retaining scratch ring %#llx",
+                 (unsigned long long)ring.gpu_va);
+        if (out) *out = t;
+        return disableResult;
+    }
     gmc.vram_alloc.free(ring);
     if (out) *out = t;
     return t.doorbell_ok ? kIOReturnSuccess : kIOReturnTimeout;
