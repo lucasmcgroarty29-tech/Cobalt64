@@ -89,3 +89,17 @@ static inline bool gart_checked_vmid_bit(uint32_t vmid, uint32_t *bit)
     *bit = 1U << vmid;
     return true;
 }
+
+static inline bool gart_ranges_overlap(uint64_t total_bytes,
+                                       uint64_t a_offset,
+                                       uint64_t a_size,
+                                       uint64_t b_offset,
+                                       uint64_t b_size)
+{
+    if (!gart_checked_range(total_bytes, a_offset, a_size) ||
+        !gart_checked_range(total_bytes, b_offset, b_size))
+        return false;
+    return a_offset < b_offset
+        ? (b_offset - a_offset) < a_size
+        : (a_offset - b_offset) < b_size;
+}
