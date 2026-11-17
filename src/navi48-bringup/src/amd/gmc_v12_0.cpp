@@ -371,55 +371,93 @@ kern_return_t
 gmc_vram_alloc_init(DeviceContext &dev, GMCContext &gmc)
 {
     if (!gmc.inited) return kIOReturnNotReady;
-    if (gmc.vram_alloc.is_inited()) return kIOReturnSuccess;
 
-    const uint64_t alloc_vram_off = dev.vramBase + kGMCVRAMAllocOffset;
+    uint64_t alloc_vram_off = 0;
+    if (!amdgpu_checked_add_u64(dev.vramBase, kGMCVRAMAllocOffset,
+                                &alloc_vram_off)) {
+        GMC_LOG("vram_alloc: visible allocator base overflows");
+        return kIOReturnBadArgument;
+    }
     if (dev.vramLimit <= alloc_vram_off) {
-        GMC_LOG("vram_alloc: vramLimit %#llx <= allocator base %#llx, "
-                "can't allocate",
+        GMC_LOG("vram_alloc: vramLimit %#llx <= allocator base %#llx, can't allocate",
                 (unsigned long long)dev.vramLimit,
                 (unsigned long long)alloc_vram_off);
         return kIOReturnNoMemory;
     }
-    const n48rebar::Pools pools = n48rebar::pool_sizes(dev.vramBase, kGMCVRAMAllocOffset, dev.vramLimit, dev.vramSizeBytes, kVramHiTotalReserve);
-    const uint64_t alloc_size = pools.visSize;                      // 0.0.663: the pure rule (rebar_pure.h), the same arithmetic as before: vramLimit - (vramBase + 24 MiB)
-    const uint64_t alloc_base_mc = gmc.vram_start + alloc_vram_off;
 
-    gmc.vram_alloc.init(alloc_base_mc, alloc_size, nullptr);
+    const n48rebar::Pools pools =
+        n48rebar::pool_sizes(dev.vramBase, kGMCVRAMAllocOffset,
+                             dev.vramLimit, dev.vramSizeBytes,
+                             kVramHiTotalReserve);
+    if (pools.visBase != alloc_vram_off || pools.visSize == 0) {
+        GMC_LOG("vram_alloc: invalid visible pool geometry (base=%#llx size=%#llx)",
+                (unsigned long long)pools.visBase,
+                (unsigned long long)pools.visSize);
+        return kIOReturnBadArgument;
+    }
 
-    // Second pool: everything above the BAR0 aperture, minus a reserved tail.
-    // The tail clears TWO things, and they are defined together in amdgpu_gmc.h
-    // because they are coupled to what the TTL reports to Apple — see the long
-    // comment there before changing either:
-    //   kVramHiTailReserve      the PSP TMR and the IP discovery table
-    //   kAppleArenaCarveReserve the region Apple carves DOWNWARD from the hiTop
-    //                           our Navi48Ttl::getLocalMemoryInfo reports
+    uint64_t alloc_base_mc = 0;
+    uint64_t alloc_end_mc = 0;
+    if (!amdgpu_checked_add_u64(gmc.vram_start, pools.visBase,
+                                &alloc_base_mc) ||
+        !amdgpu_checked_add_u64(alloc_base_mc, pools.visSize,
+                                &alloc_end_mc)) {
+        GMC_LOG("vram_alloc: visible MC interval overflows");
+        return kIOReturnBadArgument;
+    }
+
+    uint64_t hi_base_mc = 0;
+    uint64_t hi_end_mc = 0;
+    if (pools.hi &&
+        (!amdgpu_checked_add_u64(gmc.vram_start, pools.hiBase,
+                                 &hi_base_mc) ||
+         !amdgpu_checked_add_u64(hi_base_mc, pools.hiSize,
+                                 &hi_end_mc))) {
+        GMC_LOG("vram_alloc_hi: high MC interval overflows");
+        return kIOReturnBadArgument;
+    }
+
+    // Keep partial initialisation retryable: if the visible pool succeeded
+    // but the high pool failed previously, initialise only the missing pool.
+    if (!gmc.vram_alloc.is_inited()) {
+        gmc.vram_alloc.init(alloc_base_mc, pools.visSize, nullptr);
+        if (!gmc.vram_alloc.is_inited()) {
+            GMC_LOG("vram_alloc: allocator rejected validated interval");
+            return kIOReturnNoMemory;
+        }
+    }
+
     if (pools.hi) {
         gmc.vram_hi_base = pools.hiBase;
         gmc.vram_hi_size = pools.hiSize;
-        gmc.vram_alloc_hi.init(gmc.vram_start + gmc.vram_hi_base, gmc.vram_hi_size, nullptr);
+        if (!gmc.vram_alloc_hi.is_inited()) {
+            gmc.vram_alloc_hi.init(hi_base_mc, pools.hiSize, nullptr);
+            if (!gmc.vram_alloc_hi.is_inited()) {
+                GMC_LOG("vram_alloc_hi: allocator rejected validated interval");
+                return kIOReturnNoMemory;
+            }
+        }
         GMC_LOG("vram_alloc_hi: MC [%#llx..%#llx) = vram+[%#llx..%#llx) size=%llu MB "
-                "(device-only — CPU reaches it through MM_INDEX, not BAR0; top %llu MB "
-                "reserved: PSP TMR, IP discovery, and Apple's page-table arena)",
-                (unsigned long long)(gmc.vram_start + gmc.vram_hi_base),
-                (unsigned long long)(gmc.vram_start + gmc.vram_hi_base + gmc.vram_hi_size),
-                (unsigned long long)gmc.vram_hi_base,
-                (unsigned long long)(gmc.vram_hi_base + gmc.vram_hi_size),
-                (unsigned long long)(gmc.vram_hi_size >> 20),
+                "(device-only — CPU reaches it through MM_INDEX, not BAR0; top %llu MB reserved)",
+                (unsigned long long)hi_base_mc,
+                (unsigned long long)hi_end_mc,
+                (unsigned long long)pools.hiBase,
+                (unsigned long long)(pools.hiBase + pools.hiSize),
+                (unsigned long long)(pools.hiSize >> 20),
                 (unsigned long long)(kVramHiTotalReserve >> 20));
     } else {
         GMC_LOG("vram_alloc_hi: not created (vram %llu MB, aperture %llu MB)",
                 (unsigned long long)(dev.vramSizeBytes >> 20),
                 (unsigned long long)(dev.vramLimit >> 20));
     }
+
     GMC_LOG("vram_alloc: MC [%#llx..%#llx) = vram+[%#llx..%#llx) "
-            "size=%llu MB (BAR0-mapped; below vram+%#llx is reserved: "
-            "console fb / PSP / GART PT / fw_buf)",
+            "size=%llu MB (BAR0-mapped; below vram+%#llx is reserved)",
             (unsigned long long)alloc_base_mc,
-            (unsigned long long)(alloc_base_mc + alloc_size),
+            (unsigned long long)alloc_end_mc,
             (unsigned long long)alloc_vram_off,
             (unsigned long long)dev.vramLimit,
-            (unsigned long long)(alloc_size >> 20),
+            (unsigned long long)(pools.visSize >> 20),
             (unsigned long long)alloc_vram_off);
     return kIOReturnSuccess;
 }
