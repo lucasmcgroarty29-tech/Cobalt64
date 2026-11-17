@@ -193,7 +193,12 @@ public:
     // allocation didn't match this allocator's range.
     void free(const VRAMAllocation &a) {
         ScopedLock guard(*this);
-        if (!m_inited || a.size == 0 || a.gpu_va < m_base) return;
+        if (!m_inited || a.size == 0 || a.gpu_va < m_base ||
+            a.alignment < 16384 ||
+            (a.alignment & (a.alignment - 1ULL)) != 0 ||
+            (a.gpu_va & (a.alignment - 1ULL)) != 0 ||
+            (a.size & (a.alignment - 1ULL)) != 0)
+            return;
         const uint64_t offset = a.gpu_va - m_base;
         const uint64_t length = a.size;
         if (!amdgpu_range_fits(m_size, offset, length) ||
