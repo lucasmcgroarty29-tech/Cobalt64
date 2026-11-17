@@ -789,7 +789,8 @@ IOReturn n1c_open(BringupContext &ctx, bool ws, N1cRef *out) {
                 bar0_memcpy_to_vram(*dev, gmc.gart_pt_vram_offset + (win.gartOff / kPage + i) * 8ull, &zero, sizeof(zero));
             if (!amdgpu_hdp_flush(*dev)) {
                 win.poisoned = true;
-                N1C_LOG("open refused: HDP flush unavailable while initialising fence window; its GART range is quarantined");
+                gSlotState[slot] = kSlotDead;
+                N1C_LOG("open refused: HDP flush unavailable while initialising fence window; its GART range and slot are quarantined");
                 rc = kIOReturnNotReady;
                 break;
             }
@@ -993,7 +994,7 @@ void n1c_close(const N1cRef &ref, const char *how) {
     }
     __atomic_store_n(&s->hello, false, __ATOMIC_RELEASE);
     __atomic_store_n(&s->open, false, __ATOMIC_RELEASE);          // the Session itself is static (slot 0) or never freed (slots 1..3)
-    gSlotState[s->slot] = slot_after_close(parked, ownIdle);       // 0.0.627 (G2): a VMID that may still be in use is never handed out again
+    gSlotState[s->slot] = gWin[s->slot].poisoned ? (uint8_t)kSlotDead : slot_after_close(parked, ownIdle); // poisoned fence windows are never selected again
     if (s->ws) __atomic_store_n(&gSessWs, 0u, __ATOMIC_SEQ_CST);   // 0.0.623 (G1): no WindowServer session any more
     if (s->ws) __atomic_store_n(&gWsId, 0u, __ATOMIC_SEQ_CST);     // 0.0.650 (G5)
     if (!multi) OSCompareAndSwap(1, 0, &gOpenFlag);
