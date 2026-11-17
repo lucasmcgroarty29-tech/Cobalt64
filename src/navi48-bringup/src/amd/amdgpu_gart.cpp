@@ -50,6 +50,9 @@
 
 namespace amdgpu {
 
+static_assert(kAMDGPUGPUPageSize == 4096,
+              "GART checked bounds helpers require 4 KiB GPU pages");
+
 //============================================================
 // gart_init — populate GARTContext from a just-enabled GMC GART.
 //
