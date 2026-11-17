@@ -507,3 +507,18 @@ propagation because some are best-effort observations while others precede
 engine submissions. The helper's status is an availability/issue check only:
 the remap write/read-back has not been validated on physical hardware. The
 Linux host workflow does not compile these IOKit translation units.
+
+
+## SDMA submission gating follow-up (2026-11-17)
+
+The checked HDP status is now also enforced at the submission boundary for
+the scanout linear-copy path, tiled-copy path, and fast-copy callback. If the
+remap window cannot be used, the packet is not written to the ring or kicked.
+The fast-copy positive controls release their temporary VRAM scratch when the
+pre-submit flush is unavailable; the already-bound system-memory GART buffers
+remain retained on bind failure.
+
+This closes the immediate false-success path for these reviewed submissions.
+Other diagnostic and scanout experiment callsites still contain best-effort
+flush calls and require a separate per-function review. No physical-device
+flush acknowledgement or native kext build has been demonstrated.
