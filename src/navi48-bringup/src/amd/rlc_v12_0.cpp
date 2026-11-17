@@ -403,8 +403,11 @@ rlc_setup_csb_buffer(const DeviceContext &dev, GMCContext &gmc,
 
         // Stream into VRAM via BAR0 aperture writes.
         bar0_memcpy_to_vram(dev, rlc.csb_vram_byte_offset, cpu, csb_bytes);
-        // Drain the HDP write cache so RLC sees the CSB content.
-        amdgpu_hdp_flush(dev);
+        // Do not let RLC consume the CSB until the staged data is visible.
+        if (!amdgpu_hdp_flush(dev)) {
+            RLC_LOG("CSB HDP flush unavailable — refusing to mark the buffer populated");
+            return kIOReturnNotReady;
+        }
 
         rlc.csb_populated = true;
 
