@@ -1013,7 +1013,12 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     const uint64_t fence_gpu    = inst.wb_bus + kSDMAWBExtFenceOffset;
     const uint32_t fence_value  = 0x51CAFE01u;            // 'Q1 CAFE'
     t.fence_gpu = fence_gpu;
-    if (!sdma_wb_write32(dev, inst, kSDMAWBExtFenceOffset, 0)) return kIOReturnNotReady;
+    if (!sdma_wb_write32(dev, inst, kSDMAWBExtFenceOffset, 0)) {
+        SDMA_LOG("q1-selftest: writeback mapping unavailable; scratch ring %#llx retained",
+                 (unsigned long long)ring.gpu_va);
+        if (out) *out = t;
+        return kIOReturnNotReady;
+    }
 
     uint32_t pkt[4];
     pkt[0] = SDMA_PKT_HEADER_OP(SDMA_OP_FENCE);
@@ -1022,7 +1027,12 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     pkt[3] = fence_value;
     for (uint32_t i = 0; i < 4; i++)
         WBAR0_32(dev, ring_off + i * 4u, pkt[i]);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        SDMA_LOG("q1-selftest: HDP flush unavailable after ring staging; QUEUE%u not programmed and scratch ring %#llx retained",
+                 queue, (unsigned long long)ring.gpu_va);
+        if (out) *out = t;
+        return kIOReturnNotReady;
+    }
 
     SDMA_LOG("q1-selftest: SDMA%u QUEUE%u, scratch ring MC %#llx (%u dwords), FENCE "
              "%#010x -> %#llx, doorbell dword index %#x. QUEUE0 stays live.",
