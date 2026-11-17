@@ -82,3 +82,10 @@ static inline bool gart_checked_pte_vram_range(uint64_t table_base,
     *first_byte_offset = first;
     return true;
 }
+
+static inline bool gart_checked_vmid_bit(uint32_t vmid, uint32_t *bit)
+{
+    if (bit == nullptr || vmid >= 16U) return false;
+    *bit = 1U << vmid;
+    return true;
+}
