@@ -928,8 +928,9 @@ sdma_q1_kick_doorbell_only(const DeviceContext &dev, SDMAInstance &inst,
 
     const uint64_t offs = static_cast<uint64_t>(doorbellIndex) * 4ull;
     if (dev.bar2 == nullptr || !amdgpu_range_fits(dev.bar2Size, offs, 8)) {
+        inst.submission_uncertain = true;
         SDMA_LOG("SDMA%u q1-kick: doorbell dword %#x (byte %#llx) is outside BAR2 "
-                 "(%llu bytes) — REFUSING", inst.instance, doorbellIndex,
+                 "(%llu bytes) after WPTR publication; instance quarantined", inst.instance, doorbellIndex,
                  (unsigned long long)offs, (unsigned long long)dev.bar2Size);
         return kIOReturnBadArgument;
     }
@@ -1059,27 +1060,42 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     // ---- leg A: the doorbell, and nothing else.
     uint64_t elapsed = 0;
     uint32_t last    = 0;
+    bool queueCompletionUncertain = false;
     r = sdma_q1_kick_doorbell_only(dev, inst, /*wptrDwords=*/4, doorbell_index, queue);
     if (r == kIOReturnSuccess) {
         r = sdma_poll_fence(dev, inst, kSDMAWBExtFenceOffset, fence_value,
                             /*timeout_us=*/200000ull, &elapsed, &last);
         t.doorbell_ok  = (r == kIOReturnSuccess);
+        queueCompletionUncertain = !t.doorbell_ok;
         t.doorbell_us  = elapsed;
         t.fence_last   = last;
         SDMA_LOG("q1-selftest: SDMA%u QUEUE%u doorbell dword %#x leg %s — fence "
                  "reads %#010x after %llu us", inst.instance, queue, doorbell_index,
                  t.doorbell_ok ? "PASSED (BAR2 dword ROUTES to this queue)"
-                               : "FAILED (no fence from the doorbell alone)",
+                               : "FAILED (completion unconfirmed; scratch ring retained)",
                  last, (unsigned long long)elapsed);
+    }
+
+    // A published WPTR or a successful kick with a missing fence means the
+    // queue may still fetch the scratch ring. Do not issue a second kick,
+    // disable the queue, or recycle that memory in this boot.
+    if (inst.submission_uncertain || queueCompletionUncertain) {
+        SDMA_LOG("q1-selftest: SDMA%u QUEUE%u submission/completion is uncertain; leaving queue armed and retaining scratch ring %#llx",
+                 inst.instance, queue, (unsigned long long)ring.gpu_va);
+        if (out) *out = t;
+        return kIOReturnNotReady;
     }
 
     // ---- leg B, only as the control: was it the doorbell or the queue?
     if (!t.doorbell_ok) {
         elapsed = 0; last = 0;
-        (void)sdma_q1_set_wptr_mmio(dev, inst, /*wptrDwords=*/4, queue);
-        r = sdma_poll_fence(dev, inst, kSDMAWBExtFenceOffset, fence_value,
-                            /*timeout_us=*/200000ull, &elapsed, &last);
-        t.mmio_ok    = (r == kIOReturnSuccess);
+        const kern_return_t mmioKick = sdma_q1_set_wptr_mmio(dev, inst, /*wptrDwords=*/4, queue);
+        if (mmioKick == kIOReturnSuccess) {
+            r = sdma_poll_fence(dev, inst, kSDMAWBExtFenceOffset, fence_value,
+                                /*timeout_us=*/200000ull, &elapsed, &last);
+            t.mmio_ok = (r == kIOReturnSuccess);
+            queueCompletionUncertain = !t.mmio_ok;
+        }
         t.mmio_us    = elapsed;
         t.fence_last = last;
         SDMA_LOG("q1-selftest: MMIO control leg %s — fence reads %#010x after %llu us. "
@@ -1088,8 +1104,14 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                  t.mmio_ok ? "So QUEUE1 itself works and the DOORBELL is what does "
                              "not route: widen the S2A window before the "
                              "takeover."
-                           : "Neither path fenced — QUEUE1 is not executing at all; "
-                             "do NOT run sdmamap on this boot.");
+                           : "Neither path fenced — completion may still be active; "
+                             "do NOT recycle the scratch ring.");
+    }
+    if (queueCompletionUncertain || inst.submission_uncertain) {
+        SDMA_LOG("q1-selftest: SDMA%u QUEUE%u MMIO completion is unconfirmed; leaving queue armed and retaining scratch ring %#llx",
+                 inst.instance, queue, (unsigned long long)ring.gpu_va);
+        if (out) *out = t;
+        return kIOReturnNotReady;
     }
 
     SDMAQueue1Regs regs {};
@@ -1283,7 +1305,8 @@ srbm_run_target(const DeviceContext &dev, SDMAInstance &inst,
              "%s", tag, tr.reg_dw, tr.before, tr.value,
              tr.mmio_ok ? "READS BACK (the instrument is sound)"
                         : "DOES NOT read back — every leg below would be VOID");
-    if (!tr.mmio_ok || (ibStagingUncertain && *ibStagingUncertain)) return;
+    if (!tr.mmio_ok || inst.submission_uncertain ||
+        (ibStagingUncertain && *ibStagingUncertain)) return;
 
     // Ring, Apple form; the Linux form only if the Apple one did not land, so
     // the alternate encoding's stray write never happens needlessly.
@@ -1382,12 +1405,12 @@ sdma_srbm_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     bool ibStagingUncertain = false;
     srbm_run_target(dev, inst, t.scratch, kSRBMScratchClear,
                     ib.gpu_va, ib_off, "scratch(SCRATCH_REG7)", &ibStagingUncertain);
-    if (!ibStagingUncertain)
+    if (!ibStagingUncertain && !inst.submission_uncertain)
         srbm_run_target(dev, inst, t.ctx2, 0u,
                         ib.gpu_va, ib_off, "ctx2(GCVM_CONTEXT2 PT base LO)",
                         &ibStagingUncertain);
-    if (ibStagingUncertain) {
-        SDMA_LOG("srbm-test: IB staging visibility uncertain; retaining IB allocation %#llx",
+    if (ibStagingUncertain || inst.submission_uncertain) {
+        SDMA_LOG("srbm-test: IB staging/submission visibility uncertain; retaining IB allocation %#llx",
                  (unsigned long long)ib.gpu_va);
         if (out) *out = t;
         return kIOReturnNotReady;
