@@ -126,6 +126,30 @@ static void test_reject_partial_and_forged_frees(void)
     assert(a.bytes_free() == 0x20000);
 }
 
+static void test_allocation_ledger_capacity(void)
+{
+    constexpr uint32_t kMaxTracked = 1024;
+    constexpr uint64_t kBlock = 16384;
+    VRAMBumpAllocator a;
+    a.init(0x500000ULL, (uint64_t)(kMaxTracked + 1) * kBlock);
+    std::vector<VRAMAllocation> allocations;
+    allocations.reserve(kMaxTracked);
+    for (uint32_t i = 0; i < kMaxTracked; ++i) {
+        VRAMAllocation block{};
+        assert(a.alloc(kBlock, kBlock, &block));
+        allocations.push_back(block);
+    }
+    VRAMAllocation extra{};
+    assert(!a.alloc(kBlock, kBlock, &extra));
+    assert(a.alloc_count() == kMaxTracked);
+    for (const auto &block : allocations) a.free(block);
+    assert(a.alloc_count() == 0);
+    assert(a.bytes_used() == 0);
+    assert(a.bytes_free() == (uint64_t)(kMaxTracked + 1) * kBlock);
+    assert(a.alloc(kBlock, kBlock, &extra));
+    a.free(extra);
+}
+
 static void test_concurrent_allocations_and_frees(void)
 {
     constexpr uint32_t kThreads = 8;
@@ -177,7 +201,8 @@ int main(void)
     test_coalescing_and_double_free();
     test_reject_out_of_range_free();
     test_reject_partial_and_forged_frees();
+    test_allocation_ledger_capacity();
     test_concurrent_allocations_and_frees();
-    puts("VRAM allocator: 5 test groups passed");
+    puts("VRAM allocator: 6 test groups passed");
     return 0;
 }
