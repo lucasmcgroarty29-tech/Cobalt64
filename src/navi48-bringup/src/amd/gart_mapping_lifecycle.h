@@ -28,10 +28,10 @@ typedef struct GARTMappingLifecycle {
     GARTMappingState state;
     uint32_t in_flight;
     uint32_t required_context_mask;
-    uint32_t invalidated_hub_mask;
+    uint32_t invalidated_context_mask;
 } GARTMappingLifecycle;
 
-/* required_context_mask uses one bit per translation hub that can cache this VA. */
+/* required_context_mask uses one bit per hub/VMID pair that can cache this VA. */
 void gart_lifecycle_init(GARTMappingLifecycle *lifecycle,
                          uint32_t required_context_mask);
 bool gart_lifecycle_pte_written(GARTMappingLifecycle *lifecycle);
