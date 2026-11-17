@@ -301,3 +301,18 @@ translation units or validate any hardware path. The separate GMC GART bump
 allocator remains a different structure and still has the unsynchronized
 runtime reservation issue documented above; the VRAM allocator lock does not
 solve it.
+
+
+## High-reservation overlap correction (2026-11-17)
+
+The exact-offset GMC bind path previously rejected overlap only with the
+already-consumed bump interval `[gart_bump_start, gart_bump_offset)`. In
+HIGH mode, the whole upper aperture `[gart_bump_start, gart_size)` is reserved
+for the driver's bump allocator, including the unused portion before its first
+allocation. An exact-offset mapping into that unused tail could therefore
+claim space intended for later driver allocations. The overlap check now
+protects the entire reserved HIGH interval. In legacy LOW mode
+(`gart_bump_start == 0`), it preserves the old behaviour and protects only
+the already-consumed `[0, gart_bump_offset)` interval. Host tests cover overlap,
+reverse-order overlap, adjacency and invalid ranges. This is still an
+unintegrated source-level correction pending native build and hardware testing.
