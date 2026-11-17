@@ -133,8 +133,8 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         return;
     }
     SDMAInstance &inst = ctx.sdma.instance[0];
-    if (!inst.inited || !inst.enabled) {
-        INIT_LOG("pdb0 selftest: skipped — SDMA0 is not running");
+    if (!inst.inited || !inst.enabled || inst.submission_uncertain) {
+        INIT_LOG("pdb0 selftest: skipped — SDMA0 is not in a known-good submission state");
         return;
     }
     t.ran = true;
@@ -162,7 +162,11 @@ static void run_pdb0_selftest(BringupContext &ctx) {
             INIT_LOG("pdb0 selftest: HDP flush unavailable; refusing SDMA copy");
             return kIOReturnNotReady;
         }
-        return sdma_copy_linear_test(dev, inst, srcpg.gpu_va, dst, kBytes, 200000ull);
+        const kern_return_t r = sdma_copy_linear_test(dev, inst, srcpg.gpu_va, dst, kBytes, 200000ull);
+        if (inst.submission_uncertain) {
+            INIT_LOG("pdb0 selftest: SDMA completion is uncertain; refusing readback, further legs and CONTEXT0 revert");
+        }
+        return r;
     };
     VRAMAllocation ident {};
     if (gmc.vram_alloc.alloc(kBytes, kASPageSize, &ident)) {
@@ -172,6 +176,10 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         // fill_via_copy performs the checked drain for both this poison and its source.
         t.identity_addr = ident.gpu_va;
         kern_return_t r = fill_via_copy(ident.gpu_va, pat);
+        if (inst.submission_uncertain) {
+            INIT_LOG("pdb0 selftest: identity DMA completion unconfirmed; retaining source/destination and leaving PDB0 unchanged");
+            return;
+        }
         uint32_t bad = 0;
         for (uint32_t i = 0; i < kDwords; i++)
             if (RBAR0_32(dev, off + (uint64_t)i * 4) != pat) bad++;
@@ -196,6 +204,10 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         // fill_via_copy performs the checked drain for both this poison and its source.
         t.alias_addr = off;
         kern_return_t r = fill_via_copy(off, pat);
+        if (inst.submission_uncertain) {
+            INIT_LOG("pdb0 selftest: alias DMA completion unconfirmed; retaining source/destination and leaving PDB0 unchanged");
+            return;
+        }
         uint32_t bad = 0;
         for (uint32_t i = 0; i < kDwords; i++)
             if (RBAR0_32(dev, off + (uint64_t)i * 4) != pat) bad++;
@@ -227,6 +239,10 @@ static void run_pdb0_selftest(BringupContext &ctx) {
             sysmem_wmb();
             t.gart_addr = mc;
             kern_return_t r = fill_via_copy(mc, pat);
+            if (inst.submission_uncertain) {
+                INIT_LOG("pdb0 selftest: GART DMA completion unconfirmed; retaining bound sysmem and leaving PDB0 unchanged");
+                return;
+            }
             sysmem_rmb();
             uint32_t bad = 0;
             for (uint32_t i = 0; i < kDwords; i++) if (cpu[i] != pat) bad++;
