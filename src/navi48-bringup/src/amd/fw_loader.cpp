@@ -1,6 +1,7 @@
 #include "fw_loader.h"
 #include "amdgpu_ucode_extract.h"
 #include "amdgpu_log.h"
+#include "amdgpu_range_bounds.h"
 #include "../fw/fw_table.h"
 
 namespace amdgpu {
@@ -31,7 +32,7 @@ kern_return_t fw_loader_prepare(DeviceContext &dev, PSPContext &psp, FwLoaderSta
         if (n == 0) { UCODE_LOG("loader: %s (%s, %llu B): header not understood — skipped", pl.what, b->name, (unsigned long long)b->size); continue; }
         for (uint32_t i = 0; i < n && st.count < FwLoaderState::kMaxEntries; i++) {
             if (out[i].size_bytes == 0) continue;
-            if ((uint64_t)out[i].offset_bytes + out[i].size_bytes > b->size) {
+            if (!amdgpu_range_fits(b->size, out[i].offset_bytes, out[i].size_bytes)) {
                 UCODE_LOG("loader: %s payload type %u out of bounds — skipped", pl.what, out[i].fw_type); continue;
             }
             FwLoaderState::Entry &e = st.entries[st.count++];
