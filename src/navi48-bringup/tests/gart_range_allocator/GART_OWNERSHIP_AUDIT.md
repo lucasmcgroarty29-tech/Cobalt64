@@ -705,3 +705,8 @@ The GFX and MEC queue paths now refuse to rewrite an MQD or issue a duplicate ME
 ## SDMA warm-start queue stop acknowledgement (2026-11-17)
 
 Before SDMA storage is re-used during initialisation, QUEUE0 RB_ENABLE and IB_ENABLE must both read back clear after the stop writes. If either remains set, initialisation marks the instance uncertain and aborts before allocating/reusing ring backing. A previously uncertain instance is also refused at the start of `sdma_init_full`; the software `enabled` flag is cleared only after the hardware disable is acknowledged.
+
+
+## Armed legacy CP ring and active SDMA storage lifetime (2026-11-17)
+
+The legacy CP_RB0 path now records when RB_ACTIVE and its doorbell have been armed. That backing is not released or reinitialised while the legacy ring remains armed, and the legacy and MES-mapped GFX paths cannot be mixed on the same CPContext. SDMA storage release is likewise refused while the software instance still reports its queue enabled, even if no explicit fence timeout was recorded.
