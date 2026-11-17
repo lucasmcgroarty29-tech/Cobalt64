@@ -597,3 +597,10 @@ The SDMA queue-0 and queue-1 kick paths now preflight HDP before writing a write
 The central CP doorbell helper now drains staged ring writes before updating the writeback WPTR shadow. The direct compute-queue submit path similarly stages its next pointer locally, checks HDP, and only then commits the pointer and rings the doorbell. This avoids publishing a new WPTR shadow before the checked ring-content flush.
 
 The remaining unchecked HDP calls in CP/SDMA test paths are followed by these central checked submission gates, or are readback/diagnostic operations. The SDMA VRAM writeback read helper still has a best-effort flush before a diagnostic read and should be converted to an explicit invalid-read sentinel in a later pass.
+
+
+## Diagnostic scratch retention and stale-read handling (2026-11-17)
+
+The PDB0 self-test now retains its temporary visible-VRAM destination allocations if the checked source-staging HDP flush fails. It refuses the SDMA copy and does not return those destinations to the allocator, avoiding reuse while CPU-written data may not have been drained. Its GART test page remains retained by design because the bump mapping has no unbind path.
+
+The SDMA VRAM writeback read helper now returns its invalid-read sentinel when HDP cannot be issued, rather than returning a potentially stale BAR0 value as if it were a valid observation.
