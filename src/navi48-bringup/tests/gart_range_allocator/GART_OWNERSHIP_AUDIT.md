@@ -565,3 +565,12 @@ The remaining native S1c direct flushes include diagnostic/test setup, ring scru
 The primary SDMA queue path had two additional unchecked boundaries: `sdma_ring_write()` advanced its committed write pointer after an unchecked HDP flush, and `sdma_kick_doorbell()` could publish that pointer through BAR2 or MMIO even when the flush window was unavailable. Ring writes now return failure without advancing the committed pointer, and the queue-0 kick refuses both publication paths unless the checked flush succeeds. All in-tree `sdma_ring_write()` callers compare the returned dword count and therefore stop on this failure.
 
 The queue-1 external kick paths were separately gated in the prior change. These checks prevent new queue publication on the reviewed paths when HDP is unavailable; they do not validate the hardware flush semantics or prove completion of previously submitted work.
+
+
+## Fence-target and VRAM-zeroing fail-closed paths (2026-11-17)
+
+The native GTT fence-target path now requires both the checked HDP flush and VMID-0 TLB invalidation before recording a fence slot as usable. If either acknowledgement fails, the slot's entire fence window is poisoned; further GTT fence-target resolution through that window is refused, and session close must retire the window before releasing BO backing.
+
+The native visible-VRAM BO creation path also no longer reports a newly allocated BO as zero-initialised when its post-memset HDP flush is unavailable. It retains the allocation as a boot-lifetime quarantine, marks the BO non-releasable, withholds the ZEROED flag, and returns NotReady.
+
+The G1 test-only setup now checks its VMID mapping flush before continuing, and its CPU release control reports failure if the HDP flush cannot be issued. These are conservative failure paths; no native compilation or hardware test has been run.
