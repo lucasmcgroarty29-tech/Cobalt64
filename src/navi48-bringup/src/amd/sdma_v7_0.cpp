@@ -2203,7 +2203,11 @@ sdma_vram_copy_sweep(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst)
         for (uint32_t i = 0; i < nd; i++)
             WBAR0_32(dev, sOff + (uint64_t)i * 4u, sweep_pat(c, i));
         bar0_memset_vram(dev, dOff, 0xDEADBEEFu, K.bytes);
-        amdgpu_hdp_flush(dev);
+        if (!amdgpu_hdp_flush(dev)) {
+            SDMA_LOG("copy_sweep c=%u: HDP flush unavailable after staging; aborting with region %#llx retained",
+                     c, (unsigned long long)rgn.gpu_va);
+            return kIOReturnNotReady;
+        }
 
         // Controls BEFORE the copy: did the pattern land, did the poison land?
         //
@@ -2233,6 +2237,11 @@ sdma_vram_copy_sweep(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst)
             sdma_copy_linear_test(dev, inst, rgn.gpu_va + K.src_off,
                                   rgn.gpu_va + K.dst_off, K.bytes,
                                   /*timeout_us=*/500000ull, K.cpv != 0);
+        if (!amdgpu_hdp_flush(dev)) {
+            SDMA_LOG("copy_sweep c=%u: HDP flush unavailable before readback; result is untrusted and region %#llx retained",
+                     c, (unsigned long long)rgn.gpu_va);
+            return kIOReturnNotReady;
+        }
 
         // Read back. The MM window is the verdict (it is what
         // sdma_vram_copy_test uses); BAR0 is carried as a second opinion so the
@@ -2289,7 +2298,11 @@ sdma_vram_copy_sweep(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst)
         // the scanout pre-flight makes for the same reason. If this number
         // differs from barBad, the first read was stale and every count above
         // is suspect; if it matches, the bytes in memory really are wrong.
-        amdgpu_hdp_flush(dev);
+        if (!amdgpu_hdp_flush(dev)) {
+            SDMA_LOG("copy_sweep c=%u: second HDP flush unavailable; BAR0 cross-check omitted and region %#llx retained",
+                     c, (unsigned long long)rgn.gpu_va);
+            return kIOReturnNotReady;
+        }
         uint32_t barBad2 = 0;
         for (uint32_t i = 0; i < nd; i++)
             if (RBAR0_32(dev, dOff + (uint64_t)i * 4u) != sweep_pat(c, i)) barBad2++;
