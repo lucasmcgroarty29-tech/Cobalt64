@@ -1816,11 +1816,14 @@ gmc_bind_existing(DeviceContext &dev, GMCContext &gmc, uint64_t busAddr,
         !gart_checked_bus_span(busAddr, rounded))
         return kIOReturnBadArgument;
 
-    const uint64_t off = gmc.gart_bump_offset;
-    if (!gart_checked_range(gmc.gart_size, off, rounded)) {
-        GMC_LOG("gmc_bind_existing: out of GART (need %llu, offset %llu, size %llu)",
+    uint64_t off = 0;
+    if (!gart_atomic_bump_reserve(&gmc.gart_bump_offset, gmc.gart_size,
+                                  rounded, &off)) {
+        const uint64_t current = __atomic_load_n(&gmc.gart_bump_offset,
+                                                  __ATOMIC_ACQUIRE);
+        GMC_LOG("gmc_bind_existing: cannot reserve GART range (need %llu, offset %llu, size %llu)",
                 (unsigned long long)rounded,
-                (unsigned long long)off,
+                (unsigned long long)current,
                 (unsigned long long)gmc.gart_size);
         return kIOReturnNoSpace;
     }
@@ -1831,12 +1834,11 @@ gmc_bind_existing(DeviceContext &dev, GMCContext &gmc, uint64_t busAddr,
     if (!gart_checked_pte_vram_range(gmc.gart_pt_vram_offset,
                                      gmc.gart_pt_size, firstPTE,
                                      numPTEs, &pteBaseOffset) ||
-        !gart_checked_add_u64(gmc.gart_start, off, &mcAddr))
+        !gart_checked_add_u64(gmc.gart_start, off, &mcAddr)) {
+        GMC_LOG("gmc_bind_existing: reserved GART interval %#llx+%#llx failed page-table bounds; interval quarantined",
+                (unsigned long long)off, (unsigned long long)rounded);
         return kIOReturnBadArgument;
-
-    // Reserve the interval before writing PTEs. This remains a bump allocator;
-    // concurrent callers still require the shared-lock audit before use.
-    gmc.gart_bump_offset = off + rounded;
+    }
 
     for (uint32_t i = 0; i < numPTEs; i++) {
         const uint64_t pa = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
@@ -1907,9 +1909,15 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
     // for this driver's bump allocator, even before its first allocation.
     // In legacy LOW mode, only the already-consumed [0, bump_offset) interval
     // is protected, preserving the documented Apple-page contention behaviour.
+    if (gmc.gart_bump_start == 0) {
+        GMC_LOG("bind_at: refusing exact-offset mapping in LOW bump mode; the driver and Apple would share one allocatable interval");
+        return kIOReturnNotReady;
+    }
+    const uint64_t bumpOffset = __atomic_load_n(&gmc.gart_bump_offset,
+                                                 __ATOMIC_ACQUIRE);
     uint64_t reservedEnd = 0;
     if (!gart_checked_bump_reserved_end(gmc.gart_size, gmc.gart_bump_start,
-                                        gmc.gart_bump_offset, &reservedEnd))
+                                        bumpOffset, &reservedEnd))
         return kIOReturnNotReady;
     const uint64_t reservedSize = reservedEnd - gmc.gart_bump_start;
     if (gart_ranges_overlap(gmc.gart_size, gartOffset, rounded,
