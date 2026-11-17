@@ -15,6 +15,7 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOReturn.h>
 #include "amdgpu_ip.h"
+#include "amdgpu_range_bounds.h"
 
 // Cast-clean version of the reference macro (identical arithmetic; avoids
 // -Wsign-conversion noise from int-typed mask/shift constants).
@@ -80,30 +81,30 @@ static inline uint32_t RREG32_abs(const DeviceContext &ctx, uint32_t reg) { retu
 static inline void storeFence() { __asm__ __volatile__("sfence" ::: "memory"); }
 
 static inline uint32_t RBAR0_32(const DeviceContext &ctx, uint64_t byte_offset) {
-    if (!ctx.bar0 || byte_offset + 4 > ctx.bar0Size) return 0xFFFFFFFFu;
+    if (!ctx.bar0 || !amdgpu_range_fits(ctx.bar0Size, byte_offset, 4)) return 0xFFFFFFFFu;
     return *reinterpret_cast<const volatile uint32_t *>(ctx.bar0 + byte_offset);
 }
 // The reference names its VRAM-aperture read RBAR2_32 (on Apple Silicon the
 // aperture is BAR2); keep the name so ported code compiles.
 static inline uint32_t RBAR2_32(const DeviceContext &ctx, uint64_t byte_offset) { return RBAR0_32(ctx, byte_offset); }
 static inline uint64_t RBAR0_64(const DeviceContext &ctx, uint64_t byte_offset) {
-    if (!ctx.bar0 || byte_offset + 8 > ctx.bar0Size) return ~0ULL;
+    if (!ctx.bar0 || !amdgpu_range_fits(ctx.bar0Size, byte_offset, 8)) return ~0ULL;
     return *reinterpret_cast<const volatile uint64_t *>(ctx.bar0 + byte_offset);
 }
 static inline void WBAR0_32(const DeviceContext &ctx, uint64_t byte_offset, uint32_t value) {
-    if (!ctx.bar0 || byte_offset + 4 > ctx.bar0Size) return;
+    if (!ctx.bar0 || !amdgpu_range_fits(ctx.bar0Size, byte_offset, 4)) return;
     *reinterpret_cast<volatile uint32_t *>(ctx.bar0 + byte_offset) = value;
     storeFence();
 }
 static inline void WBAR0_64(const DeviceContext &ctx, uint64_t byte_offset, uint64_t value) {
-    if (!ctx.bar0 || byte_offset + 8 > ctx.bar0Size) return;
+    if (!ctx.bar0 || !amdgpu_range_fits(ctx.bar0Size, byte_offset, 8)) return;
     *reinterpret_cast<volatile uint64_t *>(ctx.bar0 + byte_offset) = value;
     storeFence();
 }
 
 static inline void bar0_memcpy_to_vram(const DeviceContext &ctx, uint64_t vram_byte_offset,
                                        const void *src, uint64_t size_bytes) {
-    if (!ctx.bar0 || vram_byte_offset + size_bytes > ctx.bar0Size) return;
+    if (!ctx.bar0 || !amdgpu_range_fits(ctx.bar0Size, vram_byte_offset, size_bytes)) return;
     const uint8_t *bytes = static_cast<const uint8_t *>(src);
     volatile uint8_t *dst = ctx.bar0 + vram_byte_offset;
     uint64_t off = 0;
@@ -169,7 +170,8 @@ static inline void WVRAM32_via_mm(const DeviceContext &ctx, uint64_t pos, uint32
 // is rounded down to a dword; callers stage dword-aligned data.
 static inline void vram_memcpy(const DeviceContext &ctx, uint64_t vram_byte_offset,
                                const void *src, size_t len) {
-    if (vram_byte_offset + len <= ctx.bar0Size && ctx.bar0 != nullptr) {
+    if (vram_byte_offset > ctx.vramSizeBytes || len > ctx.vramSizeBytes - vram_byte_offset) return;
+    if (ctx.bar0 != nullptr && amdgpu_range_fits(ctx.bar0Size, vram_byte_offset, len)) {
         bar0_memcpy_to_vram(ctx, vram_byte_offset, src, len);
         return;
     }
@@ -233,17 +235,17 @@ static inline void PCIE_PORT_WREG32(const DeviceContext &ctx, uint32_t pcie_port
 
 // ---- BAR2 doorbells (reference: dev.pci->MemoryWrite32/64(bar2MemIndex, byteOff, v)) ----
 static inline void WDOORBELL32(const DeviceContext &ctx, uint64_t byte_offset, uint32_t value) {
-    if (!ctx.bar2 || byte_offset + 4 > ctx.bar2Size) return;
+    if (!ctx.bar2 || !amdgpu_range_fits(ctx.bar2Size, byte_offset, 4)) return;
     *reinterpret_cast<volatile uint32_t *>(ctx.bar2 + byte_offset) = value;
     storeFence();
 }
 static inline void WDOORBELL64(const DeviceContext &ctx, uint64_t byte_offset, uint64_t value) {
-    if (!ctx.bar2 || byte_offset + 8 > ctx.bar2Size) return;
+    if (!ctx.bar2 || !amdgpu_range_fits(ctx.bar2Size, byte_offset, 8)) return;
     *reinterpret_cast<volatile uint64_t *>(ctx.bar2 + byte_offset) = value;
     storeFence();
 }
 static inline uint32_t RDOORBELL32(const DeviceContext &ctx, uint64_t byte_offset) {
-    if (!ctx.bar2 || byte_offset + 4 > ctx.bar2Size) return 0xFFFFFFFFu;
+    if (!ctx.bar2 || !amdgpu_range_fits(ctx.bar2Size, byte_offset, 4)) return 0xFFFFFFFFu;
     return *reinterpret_cast<const volatile uint32_t *>(ctx.bar2 + byte_offset);
 }
 
