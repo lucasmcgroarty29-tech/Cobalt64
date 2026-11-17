@@ -695,3 +695,8 @@ CP and MEC queue storage is also retained while its MES mapping is still active,
 ## PDB0 inconclusive staging is not a failed mapping verdict (2026-11-17)
 
 The PDB0 diagnostic now distinguishes a failed SDMA completion from an unavailable HDP staging drain. In either case it stops before reading a destination that may be stale, before running later legs, and before reverting CONTEXT0 on an inconclusive result. The per-leg VRAM destination is retained if its poison/pattern staging was not acknowledged; the GART sysmem page remains bound as before. This prevents an HDP access failure from being misreported as evidence that PDB0 address translation is broken.
+
+
+## Prevent mutation of already-mapped CP queue state (2026-11-17)
+
+The GFX and MEC queue paths now refuse to rewrite an MQD or issue a duplicate MES ADD_QUEUE while the corresponding queue is already mapped. This complements the release guards: mapped storage remains owned until an acknowledged unmap clears the mapping state, and uncertain mappings remain quarantined.
