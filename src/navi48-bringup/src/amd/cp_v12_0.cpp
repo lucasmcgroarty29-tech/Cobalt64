@@ -460,17 +460,22 @@ cp_release_storage(CPContext &cp)
 uint32_t
 cp_ring_write(CPContext &cp, const uint32_t *src, uint32_t dwords)
 {
-    if (!cp.inited || src == nullptr || dwords == 0) return 0;
+    if (!cp.inited || cp.dev == nullptr || src == nullptr || dwords == 0) return 0;
     if (dwords > cp.ring_size_dwords / 2) {
         CP_LOG("ring_write: %u dwords exceeds half-ring %u",
                dwords, cp.ring_size_dwords / 2);
         return 0;
     }
     auto *ring = static_cast<uint32_t *>(cp.ring_cpu);
+    const uint32_t startWptr = cp.wptr;
+    uint32_t nextWptr = startWptr;
     for (uint32_t i = 0; i < dwords; i++) {
-        ring[cp.wptr] = src[i];
-        cp.wptr = (cp.wptr + 1) & cp.ring_ptr_mask;
+        ring[nextWptr] = src[i];
+        nextWptr = (nextWptr + 1) & cp.ring_ptr_mask;
     }
+    sysmem_wmb();
+    if (!amdgpu_hdp_flush(*cp.dev)) return 0;
+    cp.wptr = nextWptr;
     return dwords;
 }
 
@@ -508,7 +513,7 @@ cp_emit_eop_fence(CPContext &cp)
     pkt[n++] = 0;           // fence_value hi (we use 32-bit values for now)
     pkt[n++] = 0;           // pad
 
-    cp_ring_write(cp, pkt, n);
+    if (cp_ring_write(cp, pkt, n) != n) return 0;
     CP_LOG("emitted EOP fence value %u (wptr=%u, fence slot mc=%#llx)",
            fence, cp.wptr, (unsigned long long)cp.fence_gpu_addr);
     return fence;
@@ -1822,9 +1827,10 @@ cp_ring_test_scratch(const DeviceContext &dev, CPContext &cp, uint64_t timeout_u
     pkt[0] = cp_p3(kP3_SET_UCONFIG_REG, 1);            // 2 payload dwords
     pkt[1] = scratch - kP3_SET_UCONFIG_REG_START;      // 0x40 for base[1]=0xA000
     pkt[2] = 0xDEADBEEFu;
+    const uint32_t startWptr = cp.wptr;
     if (cp_ring_write(cp, pkt, 3) != 3) {
         CP_LOG("ring_test: ring_write refused 3 dwords");
-        return kIOReturnNoSpace;
+        return kIOReturnNotReady;
     }
     CP_LOG("ring_test: SCRATCH_REG0 [dw %#x] = %#010x before; staged %#010x %#010x %#010x "
            "(SET_UCONFIG_REG reg %#x <- 0xDEADBEEF), wptr -> %u",
@@ -1832,7 +1838,7 @@ cp_ring_test_scratch(const DeviceContext &dev, CPContext &cp, uint64_t timeout_u
 
     amdgpu_hdp_flush(dev);
     kern_return_t r = cp_kick_doorbell(dev, cp);
-    if (r != kIOReturnSuccess) return r;
+    if (r != kIOReturnSuccess) { cp.wptr = startWptr; return r; }
 
     uint64_t elapsed = 0;
     uint32_t v = before;
@@ -1873,6 +1879,7 @@ cp_submit_ib(const DeviceContext &dev, CPContext &cp, uint64_t ib_gpu_va,
     if ((ib_gpu_va & 0x3ull) != 0) return kIOReturnBadArgument;
     if (vmid > 15) return kIOReturnBadArgument;
 
+    const uint32_t startWptr = cp.wptr;
     uint32_t ring[7];
     uint32_t k = 0;
     ring[k++] = cp_p3(kP3_CONTEXT_CONTROL, 1);
@@ -1885,11 +1892,11 @@ cp_submit_ib(const DeviceContext &dev, CPContext &cp, uint64_t ib_gpu_va,
     if (cp_ring_write(cp, ring, k) != k) return kIOReturnNoSpace;
 
     const uint32_t fence = cp_emit_eop_fence(cp);
-    if (fence == 0) return kIOReturnInternalError;
+    if (fence == 0) { cp.wptr = startWptr; return kIOReturnNotReady; }
 
     amdgpu_hdp_flush(dev);
     kern_return_t r = cp_kick_doorbell(dev, cp);
-    if (r != kIOReturnSuccess) return r;
+    if (r != kIOReturnSuccess) { cp.wptr = startWptr; return r; }
     if (out_fence) *out_fence = fence;
     return kIOReturnSuccess;
 }
@@ -2256,11 +2263,12 @@ cp_submit_eop_test(const DeviceContext &dev, CPContext &cp,
     if (outFence) *outFence = 0;
     if (!cp.inited) return kIOReturnNotReady;
 
+    const uint32_t startWptr = cp.wptr;
     uint32_t fence = cp_emit_eop_fence(cp);
-    if (fence == 0) return kIOReturnInternalError;
+    if (fence == 0) { cp.wptr = startWptr; return kIOReturnNotReady; }
 
     kern_return_t r = cp_kick_doorbell(dev, cp);
-    if (r != kIOReturnSuccess) return r;
+    if (r != kIOReturnSuccess) { cp.wptr = startWptr; return r; }
 
     const uint64_t kStepUs = 1000;
     uint64_t elapsed = 0;
