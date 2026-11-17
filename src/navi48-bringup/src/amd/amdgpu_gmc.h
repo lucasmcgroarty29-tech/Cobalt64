@@ -410,7 +410,7 @@ const char *gmc_walker_error_name(uint32_t we);
 // Builds a DEPTH 1 / BLOCK_SIZE 7 tree of our own in our own VRAM, programs
 // GFXHUB CONTEXT1 (VMID 1, which nothing else on this machine uses), copies
 // through a 16-entry sub-table and through a 64 KiB leaf with SDMA IBs under
-// VMID 1, restores CONTEXT1 and frees everything. Apple's arena is untouched.
+// VMID 1, restores CONTEXT1 and frees everything only after the VMID-1 TLB flush acknowledges; on timeout the temporary VRAM allocations are quarantined. Apple's arena is untouched.
 struct SDMAInstance;
 struct VMFragTestResult {
     bool     ran       { false };
