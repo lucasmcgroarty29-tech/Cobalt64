@@ -254,8 +254,8 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
         const uint64_t physAddr = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
         const uint64_t pte = (physAddr & ~((uint64_t)0xFFFULL)) |
                              PTEFlags::SYSMEM_RW;
-        const uint64_t pteOffsetInPT = (pteStartIndex + i) * 8ULL;
-        bar0_memcpy_to_vram(dev, gart.pageTableVRAMOffset + pteOffsetInPT,
+        const uint64_t pteOffsetInPT = pteBaseOffset + (uint64_t)i * 8ULL;
+        bar0_memcpy_to_vram(dev, pteOffsetInPT,
                             &pte, sizeof(pte));
     }
     amdgpu_hdp_flush(dev);
