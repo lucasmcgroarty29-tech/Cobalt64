@@ -207,7 +207,10 @@ static inline void vram_memcpy(const DeviceContext &ctx, uint64_t vram_byte_offs
 // (rmmio_remap.reg_offset + KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL). The reference
 // blind-writes BAR5+0x44000; we read the remap register and only write where
 // the hardware actually points (nothing if the remap is unprogrammed).
-static inline void amdgpu_hdp_flush(const DeviceContext &ctx) {
+// Returns true only when a plausible remap window was available, the flush write
+// was issued, and the read-back register access was valid. This is not a GPU
+// completion fence and does not replace hub/VMID TLB invalidation.
+static inline bool amdgpu_hdp_flush(const DeviceContext &ctx) {
     static bool logged = false;
     // The remap register's BASE_IDX differs between NBIO generations (2 on most
     // nbio_v7_x, 0 in the reference's table): read both, use the first plausible.
@@ -222,7 +225,8 @@ static inline void amdgpu_hdp_flush(const DeviceContext &ctx) {
     const bool usable = remap != 0;
     if (!logged) { logged = true; IOLog("Navi48Bringup: hdp: REMAP_HDP_MEM_FLUSH_CNTL idx2=0x%08x idx0=0x%08x -> %s (0x%x)\n", r2, r0, usable ? "flush via remap window" : "no flush window; HDP flush writes skipped", remap); }
     if (usable) ctx.rmmio[remap / 4] = 0;
-    (void)RREG32(ctx, 0x0DE3);   // read-back barrier the reference relies on
+    const uint32_t readback = RREG32(ctx, 0x0DE3);
+    return usable && readback != 0xFFFFFFFFu;
 }
 
 // ---- SMN indirect access (BIF_BX1_PCIE_INDEX2 / DATA2, absolute dwords from amdgpu_ip.h) ----
