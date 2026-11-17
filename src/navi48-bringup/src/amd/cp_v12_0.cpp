@@ -1357,6 +1357,7 @@ cp_hqd_program(const DeviceContext &dev, CPContext &cp)
 kern_return_t
 cp_gfx_start(DeviceContext &dev, CPContext &cp, bool legacy_unhalt)
 {
+    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
 
     CP_LOG("cp_gfx_start: CP_MAX_CONTEXT / CP_DEVICE_ID%s",
@@ -1739,7 +1740,7 @@ cp_gfx_mqd_init_external(const DeviceContext &dev, CPContext &cp,
 kern_return_t
 cp_map_gfx_kgq_mes(const DeviceContext &dev, CPContext &cp, MESContext &mes)
 {
-    if (!cp.inited) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
     if (!cp.gfx_mqd_inited) {
         CP_LOG("map_gfx_kgq_mes: MQD not initialised — call cp_gfx_mqd_init first");
         return kIOReturnNotReady;
@@ -1778,7 +1779,8 @@ cp_map_gfx_kgq_mes(const DeviceContext &dev, CPContext &cp, MESContext &mes)
 
     kern_return_t r = mes_add_hw_queue(dev, mes, in);
     if (r != kIOReturnSuccess) {
-        CP_LOG("map_gfx_kgq_mes: MES did not ack ADD_QUEUE: %#x", r);
+        cp.submission_uncertain = true;
+        CP_LOG("map_gfx_kgq_mes: MES did not ack ADD_QUEUE; queue state is uncertain: %#x", r);
         cp_dump_gfx_hqd(dev, "after FAILED MES ADD_QUEUE");
         return r;
     }
@@ -2670,6 +2672,7 @@ kern_return_t
 cp_compute_queue_alloc(DeviceContext &dev, GMCContext &gmc, ComputeQueue &cq,
                        uint32_t pipe, uint32_t queue)
 {
+    if (cq.submission_uncertain) return kIOReturnNotReady;
     if (cq.inited) return kIOReturnSuccess;
     cq.me = 1; cq.pipe = pipe; cq.queue = queue;
 
@@ -2867,7 +2870,8 @@ cp_compute_queue_map_mes(const DeviceContext &dev, ComputeQueue &cq, MESContext 
 
     kern_return_t r = mes_add_hw_queue(dev, mes, in);
     if (r != kIOReturnSuccess) {
-        CP_LOG("compute_queue_map: MES did not ack ADD_QUEUE: %#x", r);
+        cq.submission_uncertain = true;
+        CP_LOG("compute_queue_map: MES did not ack ADD_QUEUE; queue state is uncertain: %#x", r);
         return r;
     }
     cq.mapped = true;
@@ -2961,7 +2965,7 @@ kern_return_t
 cp_compute_wait_fence(ComputeQueue &cq, uint32_t fence, uint64_t timeout_us,
                       uint64_t *observed, uint64_t *elapsed_us)
 {
-    if (!cq.inited || cq.fence_cpu == nullptr) return kIOReturnNotReady;
+    if (!cq.inited || cq.submission_uncertain || cq.fence_cpu == nullptr) return kIOReturnNotReady;
     constexpr uint64_t kFastUs = 5000;
     uint64_t elapsed = 0, v = 0;
     while (elapsed < timeout_us) {
