@@ -115,3 +115,23 @@ static inline bool gart_checked_bump_reserved_end(uint64_t total_bytes,
     *reserved_end = bump_start != 0 ? total_bytes : bump_offset;
     return true;
 }
+
+static inline bool gart_atomic_bump_reserve(uint64_t *next_offset,
+                                            uint64_t total_bytes,
+                                            uint64_t span_bytes,
+                                            uint64_t *reserved_offset)
+{
+    if (next_offset == nullptr || reserved_offset == nullptr || span_bytes == 0)
+        return false;
+    uint64_t current = __atomic_load_n(next_offset, __ATOMIC_ACQUIRE);
+    for (;;) {
+        if (!gart_checked_range(total_bytes, current, span_bytes))
+            return false;
+        const uint64_t desired = current + span_bytes;
+        if (__atomic_compare_exchange_n(next_offset, &current, desired, false,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            *reserved_offset = current;
+            return true;
+        }
+    }
+}
