@@ -2633,6 +2633,7 @@ sdma_init_full(DeviceContext &dev,
             SDMA_LOG("init_full: SDMA%u queue disable was not acknowledged; backing remains quarantined", i);
             return stopResult;
         }
+        sdma.instance[i].enabled = false;
         const kern_return_t unhaltResult = sdma_engine_halt(dev, i, /*halt=*/false);
         if (unhaltResult != kIOReturnSuccess) return unhaltResult;
         sdma_log_status(dev, i);
