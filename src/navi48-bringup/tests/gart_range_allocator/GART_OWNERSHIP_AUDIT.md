@@ -484,3 +484,26 @@ a checked result and mapping publication propagate failure. Do not blindly
 change its return contract or add a generic TLB flush: some callsites are
 initialisation/diagnostic paths, and the required hub/VMID scope is not encoded
 at this layer.
+
+
+## Checked HDP flush availability (2026-11-17)
+
+The HDP helper now returns a status instead of silently treating a missing NBIO
+remap window as success. A true result means the remapped flush write was
+issued and the read-back register access was valid; it is not proof of GPU
+completion and does not replace TLB invalidation.
+
+The status is propagated through GMC initialization, PDB0 publication/revert,
+GMC bump mappings, and exact-offset mappings. A failed bump-map flush leaves
+the already-reserved interval quarantined; it is deliberately not rolled back.
+The clear-state publisher and the pre-handoff graphics takeover path also
+refuse to publish/hand off after an unavailable flush. Native S1b host-driven
+test setup, staging, and poison operations now stop when the flush cannot be
+issued.
+
+Other direct flush calls remain in diagnostic, scanout, fast-copy, and
+experimental paths. They need individual caller review before broad
+propagation because some are best-effort observations while others precede
+engine submissions. The helper's status is an availability/issue check only:
+the remap write/read-back has not been validated on physical hardware. The
+Linux host workflow does not compile these IOKit translation units.
