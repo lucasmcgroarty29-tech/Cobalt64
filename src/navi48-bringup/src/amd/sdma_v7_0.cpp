@@ -111,7 +111,7 @@ void
 sdma_wb_write32(const DeviceContext &dev, const SDMAInstance &inst,
                 uint32_t byte_offset, uint32_t value)
 {
-    if (byte_offset + 4 > kSDMAWBPageBytes) return;
+    if (!amdgpu_range_fits(kSDMAWBPageBytes, byte_offset, 4)) return;
     if (inst.wb_in_vram) {
         WBAR0_32(dev, inst.wb_vram_off + byte_offset, value);
         amdgpu_hdp_flush(dev);
@@ -904,7 +904,7 @@ sdma_q1_kick_doorbell_only(const DeviceContext &dev, const SDMAInstance &inst,
     amdgpu_hdp_flush(dev);
 
     const uint64_t offs = static_cast<uint64_t>(doorbellIndex) * 4ull;
-    if (dev.bar2 == nullptr || offs + 8 > dev.bar2Size) {
+    if (dev.bar2 == nullptr || !amdgpu_range_fits(dev.bar2Size, offs, 8)) {
         SDMA_LOG("SDMA%u q1-kick: doorbell dword %#x (byte %#llx) is outside BAR2 "
                  "(%llu bytes) — REFUSING", inst.instance, doorbellIndex,
                  (unsigned long long)offs, (unsigned long long)dev.bar2Size);
@@ -1438,7 +1438,7 @@ sdma_kick_doorbell(const DeviceContext &dev, const SDMAInstance &inst)
     // wptr<<2 (bytes) as in sdma_v7_0_ring_set_wptr.
     const uint64_t offs =
         static_cast<uint64_t>(inst.doorbell_index) * 4ull;
-    if (dev.bar2 == nullptr || offs + 8 > dev.bar2Size) {
+    if (dev.bar2 == nullptr || !amdgpu_range_fits(dev.bar2Size, offs, 8)) {
         SDMA_LOG("SDMA%u kick: doorbell offset %#llx outside BAR2 "
                  "(bar2Size=%llu) — MMIO WPTR path only",
                  inst.instance, (unsigned long long)offs,
