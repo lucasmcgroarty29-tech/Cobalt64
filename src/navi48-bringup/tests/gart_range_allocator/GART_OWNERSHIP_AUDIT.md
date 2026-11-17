@@ -574,3 +574,10 @@ The native GTT fence-target path now requires both the checked HDP flush and VMI
 The native visible-VRAM BO creation path also no longer reports a newly allocated BO as zero-initialised when its post-memset HDP flush is unavailable. It retains the allocation as a boot-lifetime quarantine, marks the BO non-releasable, withholds the ZEROED flag, and returns NotReady.
 
 The G1 test-only setup now checks its VMID mapping flush before continuing, and its CPU release control reports failure if the HDP flush cannot be issued. These are conservative failure paths; no native compilation or hardware test has been run.
+
+
+## Poisoned fence-window close correction (2026-11-17)
+
+A follow-up review found that a failed new fence-target publication can write a PTE before the software `FenceSlot` record is committed. If the flush then fails, the window is marked poisoned but that slot is not present in the session's slot table. Close now treats a poisoned window as requiring full-window retirement: it clears every PTE in the 16-page window and requires HDP plus VMID-0 invalidation before releasing any BO backing. If that acknowledgement fails, backing remains quarantined and the slot stays permanently dead.
+
+This closes a software bookkeeping gap in the fail-closed path. It remains source-level reasoning pending native compilation and hardware validation.
