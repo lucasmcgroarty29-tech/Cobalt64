@@ -3,6 +3,9 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <algorithm>
+#include <thread>
+#include <vector>
 
 using amdgpu::VRAMAllocation;
 using amdgpu::VRAMBumpAllocator;
@@ -83,11 +86,57 @@ static void test_reject_out_of_range_free(void)
     assert(a.bytes_used() == 0);
 }
 
+static void test_concurrent_allocations_and_frees(void)
+{
+    constexpr uint32_t kThreads = 8;
+    constexpr uint32_t kPerThread = 128;
+    constexpr uint64_t kBlock = 16384;
+    constexpr uint64_t kPoolBytes = (uint64_t)kThreads * kPerThread * kBlock * 2ULL;
+    VRAMBumpAllocator a;
+    a.init(0x400000ULL, kPoolBytes);
+
+    std::vector<VRAMAllocation> allocations[kThreads];
+    std::thread workers[kThreads];
+    for (uint32_t t = 0; t < kThreads; ++t) {
+        workers[t] = std::thread([&, t]() {
+            allocations[t].reserve(kPerThread);
+            for (uint32_t i = 0; i < kPerThread; ++i) {
+                VRAMAllocation block{};
+                assert(a.alloc(kBlock, kBlock, &block));
+                allocations[t].push_back(block);
+            }
+        });
+    }
+    for (auto &worker : workers) worker.join();
+
+    std::vector<VRAMAllocation> all;
+    all.reserve((size_t)kThreads * kPerThread);
+    for (const auto &list : allocations)
+        all.insert(all.end(), list.begin(), list.end());
+    std::sort(all.begin(), all.end(), [](const VRAMAllocation &x,
+                                         const VRAMAllocation &y) {
+        return x.gpu_va < y.gpu_va;
+    });
+    for (size_t i = 1; i < all.size(); ++i)
+        assert(all[i - 1].gpu_va + all[i - 1].size <= all[i].gpu_va);
+    assert(a.bytes_used() == (uint64_t)kThreads * kPerThread * kBlock);
+
+    for (uint32_t t = 0; t < kThreads; ++t) {
+        workers[t] = std::thread([&, t]() {
+            for (const auto &block : allocations[t]) a.free(block);
+        });
+    }
+    for (auto &worker : workers) worker.join();
+    assert(a.bytes_used() == 0);
+    assert(a.bytes_free() == kPoolBytes);
+}
+
 int main(void)
 {
     test_init_and_allocation_guards();
     test_coalescing_and_double_free();
     test_reject_out_of_range_free();
-    puts("VRAM allocator: 3 test groups passed");
+    test_concurrent_allocations_and_frees();
+    puts("VRAM allocator: 4 test groups passed");
     return 0;
 }
