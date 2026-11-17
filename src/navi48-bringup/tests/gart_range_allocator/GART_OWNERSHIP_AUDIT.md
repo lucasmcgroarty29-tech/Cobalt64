@@ -255,7 +255,7 @@ does not make concurrent reservations safe.
 ## Shared BAR and VRAM range guards (2026-11-17)
 
 A related bounds issue existed in the common register helpers:
-BAR0/BAR2 accessors and bulk BAR0 copy/set helpers checked ranges using
+BAR5 register accessors, BAR0/BAR2 accessors and bulk BAR0 copy/set helpers checked ranges using
 `offset + length > mapped_size`. That addition can wrap before the comparison.
 They now use a shared subtraction-based `amdgpu_range_fits` check, which
 requires `offset <= total` and `length <= total - offset`. The same guard
