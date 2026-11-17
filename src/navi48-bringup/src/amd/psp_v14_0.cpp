@@ -1321,6 +1321,7 @@ psp_fw_buf_stage(DeviceContext &dev, PSPContext &psp,
     if (bytes == nullptr || size == 0 || outBusAddr == nullptr) {
         return kIOReturnBadArgument;
     }
+    *outBusAddr = 0;
     constexpr uint64_t kFwBufAlign = 0x1000;
     const uint64_t slot_off =
         (psp.fwBufBumpOffset + kFwBufAlign - 1) & ~(kFwBufAlign - 1);
