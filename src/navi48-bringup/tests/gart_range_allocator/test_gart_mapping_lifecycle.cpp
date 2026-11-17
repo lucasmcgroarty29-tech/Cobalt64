@@ -36,7 +36,7 @@ static void normal_lifecycle_requires_each_context() {
 
 static void rejects_skipped_steps_and_unknown_contexts() {
     GARTMappingLifecycle l{};
-    gart_lifecycle_init(&l, 0x3u);
+    gart_lifecycle_init(&l, 0x00010001u);
     assert(!gart_lifecycle_mapping_visible(&l));
     assert(!gart_lifecycle_ptes_cleared(&l));
     assert(!gart_lifecycle_retire_complete(&l));
@@ -45,7 +45,7 @@ static void rejects_skipped_steps_and_unknown_contexts() {
     assert(gart_lifecycle_mapping_visible(&l));
     assert(gart_lifecycle_begin_retire(&l));
     assert(gart_lifecycle_ptes_cleared(&l));
-    assert(!gart_lifecycle_note_tlb_invalidated(&l, 0x00000004u));
+    assert(!gart_lifecycle_note_tlb_invalidated(&l, 0x00000002u));
     assert(!gart_lifecycle_retire_complete(&l));
     assert(gart_lifecycle_hdp_flushed(&l));
     assert(gart_lifecycle_note_tlb_invalidated(&l, 0x00010001u));
