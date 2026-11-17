@@ -558,3 +558,10 @@ The native session open path now refuses to publish a new fence window, park roo
 Host-import mapping and ordinary VA MAP now retain the BO and software mapping record if HDP or TLB acknowledgement fails, so a later BO release cannot mistakenly recycle the backing memory. VA UNMAP now removes the software map record only after both HDP and VMID invalidation succeed. If either step fails, the map record remains as a quarantine reference and backing memory cannot be safely returned.
 
 The remaining native S1c direct flushes include diagnostic/test setup, ring scrub and other paths that need per-operation review. These edits remain uncompiled IOKit source changes; host CI cannot validate their C++ or runtime behavior.
+
+
+## SDMA queue-0 publication follow-up (2026-11-17)
+
+The primary SDMA queue path had two additional unchecked boundaries: `sdma_ring_write()` advanced its committed write pointer after an unchecked HDP flush, and `sdma_kick_doorbell()` could publish that pointer through BAR2 or MMIO even when the flush window was unavailable. Ring writes now return failure without advancing the committed pointer, and the queue-0 kick refuses both publication paths unless the checked flush succeeds. All in-tree `sdma_ring_write()` callers compare the returned dword count and therefore stop on this failure.
+
+The queue-1 external kick paths were separately gated in the prior change. These checks prevent new queue publication on the reviewed paths when HDP is unavailable; they do not validate the hardware flush semantics or prove completion of previously submitted work.
