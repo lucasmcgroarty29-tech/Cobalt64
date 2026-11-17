@@ -37,7 +37,7 @@ static void test_ranges_and_pte_bounds(void)
     assert(!gart_checked_pte_range(4096, 0, 0));
     uint64_t first_byte = 0;
     assert(gart_checked_pte_vram_range(0x1000, 4096, 511, 1, &first_byte));
-    assert(first_byte == 0x2ff8);
+    assert(first_byte == 0x1ff8);
     assert(!gart_checked_pte_vram_range(UINT64_MAX - 4095ULL, 4096,
                                         0, 1, &first_byte));
     assert(!gart_checked_pte_vram_range(0x1000, 4096, 512, 1, &first_byte));
