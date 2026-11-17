@@ -28,6 +28,8 @@ on:
       - "src/navi48-bringup/src/amd/gart_range_allocator.*"
       - "src/navi48-bringup/src/amd/gart_mapping_lifecycle.*"
       - "src/navi48-bringup/src/amd/rebar_pure.h"
+      - "src/navi48-bringup/src/amd/amdgpu_range_bounds.h"
+      - "src/navi48-bringup/src/amd/gart_range_bounds.h"
       - "src/navi48-bringup/src/amd/amdgpu_vram.h"
       - "src/navi48-bringup/src/amd/gmc_v12_0.cpp"
       - "src/navi48-bringup/tests/native_rebar_test.cpp"
@@ -53,7 +55,5 @@ jobs:
         run: make -C src/navi48-bringup/tests/gart_range_allocator test-tsan
       - name: Build and run ReBAR and VRAM geometry tests
         run: |
-          g++ -std=c++17 -Wall -Wextra -Werror -O1 -fsanitize=address,undefined -fno-sanitize-recover=all \\
-            -I src/navi48-bringup/src -I src/navi48-bringup/src/amd \\
-            src/navi48-bringup/tests/native_rebar_test.cpp -o /tmp/native_rebar
+          g++ -std=c++17 -Wall -Wextra -Werror -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -I src/navi48-bringup/src -I src/navi48-bringup/src/amd src/navi48-bringup/tests/native_rebar_test.cpp -o /tmp/native_rebar
           /tmp/native_rebar .
