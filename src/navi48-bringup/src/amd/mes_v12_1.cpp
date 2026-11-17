@@ -100,6 +100,7 @@
 #include "amdgpu_gmc.h"
 #include "amdgpu_ucode_psp.h"
 #include "amdgpu_log.h"
+#include "amdgpu_range_bounds.h"
 #include "../fw/fw_table.h"
 
 namespace amdgpu {
@@ -362,7 +363,7 @@ mes_load_firmware(DeviceContext &dev, PSPContext &psp, MESContext &mes,
 
     for (const Payload &pl : payloads) {
         if (pl.size == 0 ||
-            static_cast<uint64_t>(pl.offset) + pl.size > size) {
+            !amdgpu_range_fits(size, pl.offset, pl.size)) {
             MES_LOG("load_firmware: %s payload out of bounds "
                     "(+%u, %u B, file %llu B)",
                     pl.name, pl.offset, pl.size, (unsigned long long)size);
