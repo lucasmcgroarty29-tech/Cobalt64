@@ -386,3 +386,13 @@ from Cobalt64's GART aperture and page-table ownership: the two cannot be
 substituted without translating reservation semantics, page granularity,
 Apple-owned exact offsets, hub/VMID visibility, and retirement rules. The
 current Cobalt64 work uses the Phase 52 material as a design reference only.
+
+
+## Concurrency sanitizer result
+
+The new ThreadSanitizer CI step passed on the GART atomic reservation and VRAM
+allocator concurrency tests. The latest completed run at this checkpoint ran
+all four host suites under AddressSanitizer/UndefinedBehaviorSanitizer and
+then reran the two concurrent suites under ThreadSanitizer, with no reported
+data races. This validates the host-side reservation and allocator models
+only; it does not compile or exercise the IOKit/GPU code that calls them.
