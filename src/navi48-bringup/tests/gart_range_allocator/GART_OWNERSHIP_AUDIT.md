@@ -540,3 +540,12 @@ Session close now clears fence-window PTEs and requires HDP plus VMID-0 invalida
 The low-level GART sysmem bind path now consumes the bump range and retains its sysmem allocation if HDP publication cannot be issued. Existing-bus binding refuses success on the same failure. For reused slots, caller ownership of the new bus range remains with the caller; the old binding metadata is not overwritten.
 
 These changes are conservative leak/quarantine behavior, not a reclamation implementation. They reduce unsafe reuse but do not prove GPU completion or hardware correctness. Native IOKit translation units still require an actual macOS build and Navi48 hardware validation.
+
+
+## Native ring and CP/SDMA publication gates (2026-11-17)
+
+The native S1c shared GFX ring now stages packet dwords first and checks HDP before committing its software write pointer, emitted sequence number, owner record, writeback pointer, or doorbell. If the checked flush is unavailable, the packet remains outside the published ring range and the caller receives NotReady.
+
+The SDMA external queue kick paths now check HDP before writing either the BAR2 doorbell or the MMIO write pointer. CP queue publication now checks HDP before marking GFX/compute MQDs ready, before MES ADD_QUEUE for the GFX/compute queues, and in the central CP doorbell helper. The direct compute queue submit path stages its write pointer locally and leaves the committed pointer unchanged if HDP fails.
+
+These gates address the reviewed submission boundaries only. Remaining direct flush calls in diagnostic, readback, scanout experiments, initialization and CP scratch-test paths still require per-caller classification. A checked true result means the remap write/readback path was available; it is not a GPU completion fence. The host CI does not compile these IOKit sources.
