@@ -110,7 +110,10 @@ static bool build_tables() {
     const bool ok = tree_build(E.tblPa, E.dataPa, [&](uint32_t page, uint32_t idx, uint64_t val) {
         WBAR0_64(dev, E.tblOff + page + (uint64_t)idx * 8u, val);
     });
-    amdgpu_hdp_flush(dev);
+    if (!ok || !amdgpu_hdp_flush(dev)) {
+        NAT_LOG("tables: HDP flush unavailable or page-table encoding failed");
+        return false;
+    }
     NAT_LOG("tables at mc %#llx (pa %#llx): root[0]=%#018llx root[256]=%#018llx | PDB1lo[%u]=%#018llx "
             "PDB0lo[%u]=%#018llx PTBlo[%#x]=%#018llx | PDB1hi[%u]=%#018llx PDB0hi[%u]=%#018llx PTBhi[%#x]=%#018llx",
             (unsigned long long)E.tbl.gpu_va, (unsigned long long)E.tblPa,
@@ -130,14 +133,14 @@ static bool stage_page(uint32_t pg, const uint32_t *dw, uint32_t n) {
     DeviceContext &dev = *E.dev;
     const uint64_t off = E.dataOff + (uint64_t)pg * 0x1000u;
     bar0_memcpy_to_vram(dev, off, dw, n * 4u);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) return false;
     for (uint32_t i = 0; i < n; i++)
         if (RBAR0_32(dev, off + (uint64_t)i * 4u) != dw[i]) return false;
     return true;
 }
-static void poison_page_range(uint32_t pg, uint32_t byteOff, uint32_t bytes) {
+static bool poison_page_range(uint32_t pg, uint32_t byteOff, uint32_t bytes) {
     bar0_memset_vram(*E.dev, E.dataOff + (uint64_t)pg * 0x1000u + byteOff, kPoison, bytes);
-    amdgpu_hdp_flush(*E.dev);
+    return amdgpu_hdp_flush(*E.dev);
 }
 
 // One WRITE_DATA (ME, memory destination, WR_CONFIRM) of `n` dwords of data[i] = seed ^ i to `va`, appended at sIb[at]. The
@@ -183,7 +186,12 @@ struct Dst { uint32_t pg; uint32_t off; uint32_t seed; };
 // destination (VA = the destination page's mapping + off). The CPU checks every dword.
 static LegResult leg_write(uint32_t leg, uint32_t ibPg, const Dst *d, uint32_t nd, bool *timedOut, uint32_t *bad) {
     *bad = 0;
-    for (uint32_t k = 0; k < nd; k++) poison_page_range(d[k].pg, d[k].off, kPatWords * 4u);
+    for (uint32_t k = 0; k < nd; k++) {
+        if (!poison_page_range(d[k].pg, d[k].off, kPatWords * 4u)) {
+            NAT_LOG("leg %s FAIL HDP flush unavailable while poisoning destination", kLegName[leg]);
+            return kLegFail;
+        }
+    }
     uint32_t at = 0;
     for (uint32_t k = 0; k < nd; k++) at = emit_write_data(at, va_of_page(d[k].pg) + d[k].off, kPatWords, d[k].seed);
     const uint64_t ibVa = va_of_page(ibPg);
@@ -216,8 +224,10 @@ static LegResult leg_compute(bool *timedOut, uint32_t *bad) {
     const uint64_t shOff = E.dataOff + (uint64_t)kPgShader * 0x1000u;
     bar0_memset_vram(dev, shOff, 0xBFB00000u, 0x1000u);
     bar0_memcpy_to_vram(dev, shOff, code, codeBytes);
-    poison_page_range(kPgResult, 0, 0x1000u);
-    amdgpu_hdp_flush(dev);
+    if (!poison_page_range(kPgResult, 0, 0x1000u) || !amdgpu_hdp_flush(dev)) {
+        NAT_LOG("leg compute FAIL HDP flush unavailable while staging shader/result");
+        return kLegFail;
+    }
     const uint64_t codeVa = va_of_page(kPgShader), resVa = va_of_page(kPgResult), ibVa = va_of_page(kPgDispatchIb);
     const uint32_t n = compute_build_va_dispatch_ib(dev, sPkt, 64, codeVa, resVa);
     if (n == 0) { NAT_LOG("leg compute FAIL the dispatch builder refused"); return kLegFail; }
@@ -397,8 +407,10 @@ kern_return_t native_s1b_run(BringupContext &ctx)
     // MUST-FIX 1: zero the WHOLE data block through BAR0 before any table is built, so no stale VRAM word (a previous boot's
     // content survives a warm reboot) is ever read as a page-table entry or a shader.
     bar0_memset_vram(*dev, E.dataOff, 0, kDataBytes);
-    amdgpu_hdp_flush(*dev);
-    if (!build_tables()) {
+    if (!amdgpu_hdp_flush(*dev)) {
+        NAT_LOG("data clear: HDP flush unavailable - stopping before touching the context");
+        s.stopped = true;
+    } else if (!build_tables()) {
         NAT_LOG("tables: an entry could not be encoded (address outside the field) - stopping before touching the context");
         s.stopped = true;
     } else {
