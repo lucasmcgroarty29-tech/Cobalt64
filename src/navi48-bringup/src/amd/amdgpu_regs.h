@@ -130,7 +130,7 @@ static inline void bar0_memcpy_to_vram(const DeviceContext &ctx, uint64_t vram_b
 // NOTE: `pattern` is a 32-bit pattern, as in the reference (not a byte).
 static inline void bar0_memset_vram(const DeviceContext &ctx, uint64_t vram_byte_offset,
                                     uint32_t pattern, uint64_t size_bytes) {
-    if (!ctx.bar0 || vram_byte_offset + size_bytes > ctx.bar0Size) return;
+    if (!ctx.bar0 || !amdgpu_range_fits(ctx.bar0Size, vram_byte_offset, size_bytes)) return;
     volatile uint8_t *dst = ctx.bar0 + vram_byte_offset;
     const uint64_t pattern64 = ((uint64_t)pattern << 32) | pattern;
     uint64_t off = 0;
@@ -148,6 +148,7 @@ static inline void bar0_memset_vram(const DeviceContext &ctx, uint64_t vram_byte
 
 // Read VRAM at any offset through the MM_INDEX/MM_DATA window (slow, whole card).
 static inline uint32_t RVRAM32_via_mm(const DeviceContext &ctx, uint64_t pos) {
+    if (!amdgpu_range_fits(ctx.vramSizeBytes, pos, 4)) return 0xFFFFFFFFu;
     constexpr uint32_t mmMM_INDEX = 0x0, mmMM_DATA = 0x1, mmMM_INDEX_HI = 0x6;
     WREG32(ctx, mmMM_INDEX_HI, (uint32_t)(pos >> 31));
     WREG32(ctx, mmMM_INDEX, ((uint32_t)pos & 0x7ffffffcu) | 0x80000000u);
@@ -159,6 +160,7 @@ static inline uint32_t RVRAM32_via_mm(const DeviceContext &ctx, uint64_t pos) {
 // the only CPU path to the rest of it. Three MMIO accesses per dword, so it is
 // for staging, not for bulk traffic — use SDMA for that once a queue exists.
 static inline void WVRAM32_via_mm(const DeviceContext &ctx, uint64_t pos, uint32_t value) {
+    if (!amdgpu_range_fits(ctx.vramSizeBytes, pos, 4)) return;
     constexpr uint32_t mmMM_INDEX = 0x0, mmMM_DATA = 0x1, mmMM_INDEX_HI = 0x6;
     WREG32(ctx, mmMM_INDEX_HI, (uint32_t)(pos >> 31));
     WREG32(ctx, mmMM_INDEX, ((uint32_t)pos & 0x7ffffffcu) | 0x80000000u);
