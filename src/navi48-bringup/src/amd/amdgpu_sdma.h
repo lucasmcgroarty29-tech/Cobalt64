@@ -511,6 +511,9 @@ struct SDMAInstance {
     uint32_t  instance;          // 0 or 1
     bool      inited;
     bool      enabled;
+    // Set permanently if ring or polled-WPTR publication becomes uncertain.
+    // A fresh device initialisation is required before submissions can resume.
+    bool      submission_uncertain;
 
     // Ring buffer — VRAM-resident (the reference moved it there because
     // GPU-initiated reads of DART-mapped sysmem return zero on AS+TB5;
@@ -706,7 +709,7 @@ void sdma_read_external_queue_regs(const DeviceContext &dev,
 // routing question ("does BAR2 dword 0x202 reach SDMA0 QUEUE1?") can only be
 // answered by a kick that has no second path, which is what this is.
 kern_return_t sdma_q1_kick_doorbell_only(const DeviceContext &dev,
-                                         const SDMAInstance &inst,
+                                         SDMAInstance &inst,
                                          uint32_t wptrDwords,
                                          uint32_t doorbellIndex,
                                          uint32_t queue = 1);
@@ -715,7 +718,7 @@ kern_return_t sdma_q1_kick_doorbell_only(const DeviceContext &dev,
 // lands here but not after the doorbell-only kick, the queue is fine and the
 // doorbell is the thing that does not route.
 kern_return_t sdma_q1_set_wptr_mmio(const DeviceContext &dev,
-                                    const SDMAInstance &inst,
+                                    SDMAInstance &inst,
                                     uint32_t wptrDwords,
                                     uint32_t queue = 1);
 
@@ -835,7 +838,7 @@ kern_return_t sdma_ib_copy_linear_test(const DeviceContext &dev,
 // RB_ENABLE=1 is deliberately set, and not before every address in the ring is
 // proven resident.
 kern_return_t sdma_kick_external_doorbell(const DeviceContext &dev,
-                                          const SDMAInstance &inst,
+                                          SDMAInstance &inst,
                                           uint32_t wptrDwords,
                                           uint32_t doorbellIndex);
 
@@ -855,7 +858,7 @@ uint32_t sdma_read_external_rptr(const DeviceContext &dev,
                                  uint32_t *wb_rptr_out);
 
 kern_return_t sdma_kick_doorbell(const DeviceContext &dev,
-                                 const SDMAInstance &inst);
+                                 SDMAInstance &inst);
 
 // Append dwords to the ring at the current software wptr; wraps.
 // Returns the number of dwords actually written (0 on overflow).

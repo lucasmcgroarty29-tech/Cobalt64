@@ -599,10 +599,10 @@ sdma_gfx_resume_instance(const DeviceContext &dev, SDMAInstance &inst)
 // wptr. See the header: this is the call that makes the GPU fetch.
 //------------------------------------------------------------------
 kern_return_t
-sdma_kick_external_doorbell(const DeviceContext &dev, const SDMAInstance &inst,
+sdma_kick_external_doorbell(const DeviceContext &dev, SDMAInstance &inst,
                             uint32_t wptrDwords, uint32_t doorbellIndex)
 {
-    if (!inst.inited) return kIOReturnNotReady;
+    if (!inst.inited || inst.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
     const uint64_t v = static_cast<uint64_t>(wptrDwords) << 2;   // byte wptr
 
@@ -612,13 +612,16 @@ sdma_kick_external_doorbell(const DeviceContext &dev, const SDMAInstance &inst,
     // 1) WPTR shadow in the EXTERNAL slot -- not kSDMAWBWptrOffset, which is
     //    QUEUE0's and belongs to the ring we are actively running.
     if (!sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v)) ||
-        !sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4, static_cast<uint32_t>(v >> 32)))
+        !sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4, static_cast<uint32_t>(v >> 32))) {
+        inst.submission_uncertain = true;
         return kIOReturnNotReady;
+    }
 
     // 2) Do not ring either doorbell or MMIO WPTR unless the shadow write is
     //    visible through the checked HDP path.
     if (!amdgpu_hdp_flush(dev)) {
-        SDMA_LOG("SDMA%u ext-kick refused: HDP flush window unavailable", inst.instance);
+        inst.submission_uncertain = true;
+        SDMA_LOG("SDMA%u ext-kick refused: HDP flush window unavailable; instance submissions quarantined", inst.instance);
         return kIOReturnNotReady;
     }
 
@@ -900,12 +903,12 @@ sdma_read_external_queue_regs(const DeviceContext &dev, const SDMAInstance &inst
 // sdma_kick_external_doorbell, separated so the routing question has an answer.
 //------------------------------------------------------------------
 kern_return_t
-sdma_q1_kick_doorbell_only(const DeviceContext &dev, const SDMAInstance &inst,
+sdma_q1_kick_doorbell_only(const DeviceContext &dev, SDMAInstance &inst,
                            uint32_t wptrDwords, uint32_t doorbellIndex,
                            uint32_t queue)
 {
     if (queue == 0 || queue >= kSDMAQueuesPerInstance) return kIOReturnBadArgument;
-    if (!inst.inited)                    return kIOReturnNotReady;
+    if (!inst.inited || inst.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
     const uint64_t v = static_cast<uint64_t>(wptrDwords) << 2;   // byte wptr
 
@@ -913,10 +916,13 @@ sdma_q1_kick_doorbell_only(const DeviceContext &dev, const SDMAInstance &inst,
     if (!amdgpu_hdp_flush(dev)) return kIOReturnNotReady;
 
     if (!sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v)) ||
-        !sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4, static_cast<uint32_t>(v >> 32)))
+        !sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4, static_cast<uint32_t>(v >> 32))) {
+        inst.submission_uncertain = true;
         return kIOReturnNotReady;
+    }
     if (!amdgpu_hdp_flush(dev)) {
-        SDMA_LOG("SDMA%u QUEUE%u doorbell-only kick refused: HDP flush window unavailable", inst.instance, queue);
+        inst.submission_uncertain = true;
+        SDMA_LOG("SDMA%u QUEUE%u doorbell-only kick refused: HDP flush window unavailable; instance submissions quarantined", inst.instance, queue);
         return kIOReturnNotReady;
     }
 
@@ -936,11 +942,11 @@ sdma_q1_kick_doorbell_only(const DeviceContext &dev, const SDMAInstance &inst,
 }
 
 kern_return_t
-sdma_q1_set_wptr_mmio(const DeviceContext &dev, const SDMAInstance &inst,
+sdma_q1_set_wptr_mmio(const DeviceContext &dev, SDMAInstance &inst,
                       uint32_t wptrDwords, uint32_t queue)
 {
     if (queue == 0 || queue >= kSDMAQueuesPerInstance) return kIOReturnBadArgument;
-    if (!inst.inited)                    return kIOReturnNotReady;
+    if (!inst.inited || inst.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
     const uint64_t v = static_cast<uint64_t>(wptrDwords) << 2;
     const auto &R = sdma_regs(dev);
@@ -1417,7 +1423,7 @@ uint32_t
 sdma_ring_write(const DeviceContext &dev, SDMAInstance &inst,
                 const uint32_t *src, uint32_t dwords)
 {
-    if (!inst.inited || dwords == 0) return 0;
+    if (!inst.inited || inst.submission_uncertain || dwords == 0) return 0;
     if (dwords > inst.ring_size_dwords) return 0;
     for (uint32_t i = 0; i < dwords; i++) {
         // ring INDEX — upstream's buf_mask (amdgpu_ring.c:122, `ring->wptr & ring->buf_mask`).
@@ -1428,7 +1434,8 @@ sdma_ring_write(const DeviceContext &dev, SDMAInstance &inst,
     // packets when it processes the doorbell. Keep the committed pointer
     // unchanged if this flush cannot be issued; staged dwords remain unpublished.
     if (!amdgpu_hdp_flush(dev)) {
-        SDMA_LOG("SDMA%u ring_write refused: HDP flush window unavailable", inst.instance);
+        inst.submission_uncertain = true;
+        SDMA_LOG("SDMA%u ring_write refused: HDP flush window unavailable; instance submissions quarantined", inst.instance);
         return 0;
     }
     // 0.0.343 — sdma-wptr-freerunning. The POINTER, upstream's ptr_mask
@@ -1458,9 +1465,9 @@ sdma_ring_write(const DeviceContext &dev, SDMAInstance &inst,
 // Value: `wptr << 2` (byte_wptr); high 32 bits zero.
 //------------------------------------------------------------------
 kern_return_t
-sdma_kick_doorbell(const DeviceContext &dev, const SDMAInstance &inst)
+sdma_kick_doorbell(const DeviceContext &dev, SDMAInstance &inst)
 {
-    if (!inst.inited) return kIOReturnNotReady;
+    if (!inst.inited || inst.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
     const uint64_t v = static_cast<uint64_t>(inst.wptr) << 2;
 
@@ -1472,13 +1479,16 @@ sdma_kick_doorbell(const DeviceContext &dev, const SDMAInstance &inst)
     //    ring->wptr_cpu_addr. With MCU_WPTR_POLL_ENABLE=1 the SDMA MCU
     //    polls this slot. Upstream's contract is the contract.
     if (!sdma_wb_write32(dev, inst, kSDMAWBWptrOffset, static_cast<uint32_t>(v)) ||
-        !sdma_wb_write32(dev, inst, kSDMAWBWptrOffset + 4, static_cast<uint32_t>(v >> 32)))
+        !sdma_wb_write32(dev, inst, kSDMAWBWptrOffset + 4, static_cast<uint32_t>(v >> 32))) {
+        inst.submission_uncertain = true;
         return kIOReturnNotReady;
+    }
 
     // 2) HDP flush so the engine's read of wptr_poll_addr drains past
     //    our CPU write. Do not publish the pointer through either path on failure.
     if (!amdgpu_hdp_flush(dev)) {
-        SDMA_LOG("SDMA%u kick refused: HDP flush window unavailable", inst.instance);
+        inst.submission_uncertain = true;
+        SDMA_LOG("SDMA%u kick refused: HDP flush window unavailable; instance submissions quarantined", inst.instance);
         return kIOReturnNotReady;
     }
 
