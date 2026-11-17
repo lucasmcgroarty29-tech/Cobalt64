@@ -435,6 +435,8 @@ struct VMFragTestResult {
     uint32_t nv_base_lo{ 0 };       // CONTEXT1 BASE LO as read back for the leg (bit 0 must read 0)
     uint32_t nv_fault_lo { 0 };     // STATUS_LO32 after leg (c)
     uint32_t nv_fault_addr_lo { 0 };
+    bool     restore_tlb_failed { false }; // VMID-1 restore invalidation did not ack
+    bool     allocations_quarantined { false }; // retain VRAM table/data on failed restore
 };
 // noValidLeg: leg (c) above. Default false: navi48-vmfrag-test=1 alone runs exactly the 0.0.193 legs.
 kern_return_t gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc,
