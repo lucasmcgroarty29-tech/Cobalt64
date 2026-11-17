@@ -1896,6 +1896,12 @@ gmc_bind_existing(DeviceContext &dev, GMCContext &gmc, uint64_t busAddr,
                 (unsigned long long)off, (unsigned long long)rounded);
         return kIOReturnBadArgument;
     }
+    const uint64_t pteBytes = (uint64_t)numPTEs * sizeof(uint64_t);
+    if (!dev.bar0 ||
+        !amdgpu_range_fits(dev.bar0Size, pteBaseOffset, pteBytes)) {
+        GMC_LOG("gmc_bind_existing: PTE array is not writable through BAR0; interval quarantined");
+        return kIOReturnNotReady;
+    }
 
     for (uint32_t i = 0; i < numPTEs; i++) {
         const uint64_t pa = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
@@ -1998,6 +2004,11 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
                                      numPTEs, &pteBaseOffset) ||
         !gart_checked_add_u64(gmc.gart_start, gartOffset, &mcAddr))
         return kIOReturnBadArgument;
+
+    const uint64_t pteBytes = (uint64_t)numPTEs * sizeof(uint64_t);
+    if (!dev.bar0 ||
+        !amdgpu_range_fits(dev.bar0Size, pteBaseOffset, pteBytes))
+        return kIOReturnNotReady;
 
     for (uint32_t i = 0; i < numPTEs; i++) {
         const uint64_t pa = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
