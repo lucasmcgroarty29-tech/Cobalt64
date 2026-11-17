@@ -466,3 +466,21 @@ IOKit. CI passing after this source change therefore confirms that the
 existing host suites remain green, not that the BAR0 helper itself has been
 compiled or exercised. Native macOS compilation and hardware validation
 remain outstanding.
+
+
+## HDP flush acknowledgement gap (2026-11-17)
+
+The BAR0 PTE writers call `amdgpu_hdp_flush()` after publishing entries, but
+that helper currently returns `void`. If neither candidate NBIO remap register
+contains a plausible flush-window offset, it logs that HDP flush writes are
+skipped and still performs only the read-back barrier. The mapping functions
+then continue to publish success. The BAR0 preflight proves the CPU can address
+the PTE bytes; it does not prove the GPU-visible HDP flush occurred.
+
+This is a distinct gap from TLB invalidation. A future change should first
+inventory every `amdgpu_hdp_flush()` callsite and determine which callers can
+safely fail when the remap is unavailable. Only then should the helper expose
+a checked result and mapping publication propagate failure. Do not blindly
+change its return contract or add a generic TLB flush: some callsites are
+initialisation/diagnostic paths, and the required hub/VMID scope is not encoded
+at this layer.
