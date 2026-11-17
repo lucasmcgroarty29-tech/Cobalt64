@@ -48,8 +48,10 @@ static inline bool gart_checked_pte_range(uint64_t table_bytes,
 static inline bool gart_checked_bus_span(uint64_t bus_address,
                                          uint64_t rounded_bytes)
 {
-    return bus_address != 0 && rounded_bytes >= 4096ULL &&
-           (rounded_bytes - 4096ULL) <= UINT64_MAX - bus_address;
+    return bus_address != 0 &&
+           (bus_address & 4095ULL) == 0 &&
+           rounded_bytes >= 4096ULL &&
+           (rounded_bytes - 1ULL) <= UINT64_MAX - bus_address;
 }
 
 static inline bool gart_checked_add_u64(uint64_t base,
