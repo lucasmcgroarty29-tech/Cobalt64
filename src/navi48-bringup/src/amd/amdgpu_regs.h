@@ -112,9 +112,12 @@ static inline void bar0_memcpy_to_vram(const DeviceContext &ctx, uint64_t vram_b
     const uint8_t *bytes = static_cast<const uint8_t *>(src);
     volatile uint8_t *dst = ctx.bar0 + vram_byte_offset;
     uint64_t off = 0;
-    while (((vram_byte_offset + off) & 7) && off + 4 <= size_bytes) {
-        uint32_t v; memcpy(&v, bytes + off, 4);
-        *reinterpret_cast<volatile uint32_t *>(dst + off) = v; off += 4;
+    // Reach 8-byte alignment with byte stores. Advancing by four bytes
+    // cannot align an address whose low three bits are odd, and typed
+    // uint32_t stores at such addresses are not suitably aligned in C++.
+    while (((vram_byte_offset + off) & 7) && off < size_bytes) {
+        dst[off] = bytes[off];
+        off++;
     }
     while (off + 8 <= size_bytes) {
         uint64_t v; memcpy(&v, bytes + off, 8);
@@ -140,8 +143,11 @@ static inline void bar0_memset_vram(const DeviceContext &ctx, uint64_t vram_byte
     volatile uint8_t *dst = ctx.bar0 + vram_byte_offset;
     const uint64_t pattern64 = ((uint64_t)pattern << 32) | pattern;
     uint64_t off = 0;
-    while (((vram_byte_offset + off) & 7) && off + 4 <= size_bytes) {
-        *reinterpret_cast<volatile uint32_t *>(dst + off) = pattern; off += 4;
+    // Use byte stores until aligned; a four-byte stride preserves an
+    // odd low-bit offset and can leave subsequent typed stores misaligned.
+    while (((vram_byte_offset + off) & 7) && off < size_bytes) {
+        dst[off] = (uint8_t)(pattern >> ((off & 3ULL) * 8ULL));
+        off++;
     }
     while (off + 8 <= size_bytes) {
         *reinterpret_cast<volatile uint64_t *>(dst + off) = pattern64; off += 8;
