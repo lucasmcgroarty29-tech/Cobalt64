@@ -89,6 +89,12 @@ public:
         m_cpu_base = static_cast<uint8_t *>(cpu_base);
         m_bytes_used = 0;
         m_alloc_count = 0;
+        for (uint32_t i = 0; i < kMaxAllocations; ++i) {
+            m_allocations[i].in_use = false;
+            m_allocations[i].gpu_va = 0;
+            m_allocations[i].size = 0;
+            m_allocations[i].alignment = 0;
+        }
         m_head = kInvalid;
         for (uint32_t i = 0; i < kMaxNodes; i++) {
             m_pool[i].next = kInvalid;
@@ -132,6 +138,18 @@ public:
         if (rounded == 0 || m_bytes_used > m_size ||
             rounded > m_size - m_bytes_used)
             return false;
+
+        // A free-list alone cannot prove that a caller is freeing the exact
+        // allocation it received. Reserve a ledger slot before changing the
+        // free-list so partial/forged frees can never release live bytes.
+        uint16_t allocation_slot = kInvalid;
+        for (uint16_t i = 0; i < kMaxAllocations; ++i) {
+            if (!m_allocations[i].in_use) {
+                allocation_slot = i;
+                break;
+            }
+        }
+        if (allocation_slot == kInvalid) return false;
 
         uint16_t prev = kInvalid;
         uint16_t cur = m_head;
@@ -179,6 +197,10 @@ public:
                 out->gpu_va = m_base + alloc_offset;
                 out->size = rounded;
                 out->alignment = alignment;
+                m_allocations[allocation_slot].gpu_va = out->gpu_va;
+                m_allocations[allocation_slot].size = rounded;
+                m_allocations[allocation_slot].alignment = alignment;
+                m_allocations[allocation_slot].in_use = true;
                 out->cpu_ptr = m_cpu_base != nullptr
                     ? (m_cpu_base + alloc_offset) : nullptr;
                 return true;
@@ -204,6 +226,17 @@ public:
         if (!amdgpu_range_fits(m_size, offset, length) ||
             m_bytes_used > m_size || length > m_bytes_used)
             return;
+
+        uint16_t allocation_slot = kInvalid;
+        for (uint16_t i = 0; i < kMaxAllocations; ++i) {
+            const AllocRecord &record = m_allocations[i];
+            if (record.in_use && record.gpu_va == a.gpu_va &&
+                record.size == a.size && record.alignment == a.alignment) {
+                allocation_slot = i;
+                break;
+            }
+        }
+        if (allocation_slot == kInvalid) return; // not an exact live allocation
 
         uint16_t prev = kInvalid;
         uint16_t cur = m_head;
@@ -249,11 +282,16 @@ public:
             else m_pool[prev].next = fresh;
         }
         m_bytes_used -= length;
+        m_allocations[allocation_slot].in_use = false;
+        m_allocations[allocation_slot].gpu_va = 0;
+        m_allocations[allocation_slot].size = 0;
+        m_allocations[allocation_slot].alignment = 0;
         if (m_alloc_count > 0) m_alloc_count--;
     }
 
 private:
     static constexpr uint16_t kMaxNodes = 256;  // up to 256 free ranges
+    static constexpr uint16_t kMaxAllocations = 1024;
     static constexpr uint16_t kInvalid  = 0xFFFF;
 
     struct FreeNode {
@@ -261,6 +299,13 @@ private:
         uint64_t length;
         uint16_t next;
         bool     in_use;
+    };
+
+    struct AllocRecord {
+        uint64_t gpu_va;
+        uint64_t size;
+        uint64_t alignment;
+        bool in_use;
     };
 
     uint16_t pool_take() {
@@ -288,6 +333,7 @@ private:
     uint8_t  *m_cpu_base    = nullptr;
     uint16_t  m_head        = kInvalid;
     FreeNode  m_pool[kMaxNodes];
+    AllocRecord m_allocations[kMaxAllocations];
 };
 
 } // namespace amdgpu
