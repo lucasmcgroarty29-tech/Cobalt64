@@ -685,3 +685,8 @@ The instance-level uncertain state is now sticky across ordinary release/resume 
 The GFX CP ring and MES-mapped compute queues now carry sticky `submission_uncertain` state. A ring-fetch, scratch-register, EOP-fence or compute-fence timeout blocks further submissions and prevents `cp_release_storage` / `cp_compute_queue_release` from returning ring, MQD, EOP or writeback backing to the allocator. Queue setup and MES remapping are refused after uncertainty; an unacknowledged MES ADD_QUEUE is also treated as uncertain ownership. The legacy CPInit path now propagates a ring-fetch timeout instead of reporting the ring ready.
 
 Several CP and native GFX paths had extra unchecked HDP flushes immediately before helpers that already perform a checked drain before publishing WPTR. Those redundant calls were removed so there is one authoritative checked publication barrier. The PDB0 self-test likewise relies on its checked `fill_via_copy` drain for both the destination poison and source pattern. If SDMA completion becomes uncertain in any PDB0 leg, it stops before readback, later legs or CONTEXT0 restoration and retains the VRAM/sysmem backing while leaving the test context stable.
+
+
+## CP queue mapping ownership and release guards (2026-11-17)
+
+CP and MEC queue storage is also retained while its MES mapping is still active, even if the most recent fence completed. `cp_release_storage` refuses to free the GFX ring/MQD/WB while `kgq_mapped` remains true; `cp_compute_queue_release` similarly refuses while `cq.mapped` is true. A failed MES ADD_QUEUE acknowledgement marks the relevant queue state uncertain, because the firmware may have applied the mapping even when the host did not receive a clean acknowledgement.
