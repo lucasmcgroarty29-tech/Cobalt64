@@ -642,3 +642,10 @@ The SDMA writeback accessor now has a checked boolean result in both declaration
 ## VMFrag timeout keeps the test context stable (2026-11-17)
 
 The VMFrag path now also avoids restoring CONTEXT1 when an SDMA IB's completion is unconfirmed. Changing VMID-1's page-table base while the engine may still be walking that context could redirect an in-flight command into unrelated address space. In this exceptional path, the diagnostic leaves CONTEXT1 on the retained test table and keeps both allocations pinned; restoration is deferred until a positively acknowledged queue reset can establish that the engine is idle. This is a deliberate fail-stop state, not a successful cleanup.
+
+
+## PSP, RLC and compute staging HDP propagation (2026-11-17)
+
+PSP command-ring submission now checks HDP before advancing its WPTR. TOC, TOC sub-bin and register-list staging refuse their PSP command when the payload flush fails. The PSP firmware-buffer bump allocator consumes and quarantines a slot after a failed flush instead of allowing a later stage to overwrite potentially pending bytes.
+
+RLC no longer marks its clear-state buffer populated until the CSB HDP drain succeeds. The compute-test path now checks the HDP result after shader, kernarg, result, IB and IB-test-target staging and stops before verification/submission when the drain is unavailable; its partially staged VRAM allocations remain owned rather than being recycled.
