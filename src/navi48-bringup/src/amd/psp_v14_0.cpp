@@ -646,9 +646,12 @@ psp_ring_cmd_submit(DeviceContext &dev, PSPContext &psp,
             (unsigned long long)psp.cmdBusAddr,
             (unsigned long long)psp.fenceBusAddr, fence_index);
 
-    // 5a. HDP flush — drain host-side write buffers so PSP sees our ring
-    //     frame + cmd_buf. Upstream calls amdgpu_device_flush_hdp here.
-    amdgpu_hdp_flush(dev);
+    // 5a. HDP flush — do not publish the PSP ring pointer unless the
+    //     command buffer and frame are known to be visible.
+    if (!amdgpu_hdp_flush(dev)) {
+        PSP_LOG("ring_cmd_submit: HDP flush unavailable; PSP command not published");
+        return kIOReturnNotReady;
+    }
 
     // 5b. Advance and publish wptr (in dwords).
     wptr_dw = (wptr_dw + frameSizeDw) % ringSizeDw;
@@ -1004,7 +1007,10 @@ psp_load_toc(DeviceContext &dev, PSPContext &psp,
     bar0_memset_vram(dev, psp.fwPriVRAMOffset, 0, psp.fwPriSize);
     bar0_memcpy_to_vram(dev, psp.fwPriVRAMOffset,
                         tocBin + payload_offset, payload_size);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        PSP_LOG("load_toc: HDP flush unavailable; refusing LOAD_TOC");
+        return kIOReturnNotReady;
+    }
 
     // 2. Build the LOAD_TOC frame.
     uint8_t cmd_buf[kPSPGfxCmdRespSize];
@@ -1080,7 +1086,10 @@ psp_load_toc_subbin(DeviceContext &dev, PSPContext &psp,
     // payload at offset 0.
     bar0_memset_vram(dev, psp.fwPriVRAMOffset, 0, psp.fwPriSize);
     bar0_memcpy_to_vram(dev, psp.fwPriVRAMOffset, subBin, subSize);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        PSP_LOG("load_toc_subbin: HDP flush unavailable; refusing LOAD_TOC");
+        return kIOReturnNotReady;
+    }
 
     uint8_t cmd_buf[kPSPGfxCmdRespSize];
     bzero(cmd_buf, sizeof(cmd_buf));
@@ -1196,7 +1205,10 @@ psp_rl_load(DeviceContext &dev, PSPContext &psp)
     bar0_memset_vram(dev, psp.fwPriVRAMOffset, 0, psp.fwPriSize);
     bar0_memcpy_to_vram(dev, psp.fwPriVRAMOffset,
                         psp.rl.start_addr, psp.rl.size_bytes);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        PSP_LOG("rl_load: HDP flush unavailable; refusing LOAD_IP_FW(REG_LIST)");
+        return kIOReturnNotReady;
+    }
 
     PSP_LOG("rl_load: staged RL (%llu B, fw_version=%#x) at vram+%#llx "
             "mc=%#llx",
@@ -1323,7 +1335,15 @@ psp_fw_buf_stage(DeviceContext &dev, PSPContext &psp,
     const uint64_t slot_vram = psp.fwBufVRAMOffset + slot_off;
     const uint64_t slot_mc   = psp.fwBufBaseMC     + slot_off;
     bar0_memcpy_to_vram(dev, slot_vram, bytes, size);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        // The bytes may be pending in the aperture. Consume this bump range
+        // permanently rather than allowing a later stage to overwrite it.
+        psp.fwBufBumpOffset = slot_off + slot_sz;
+        PSP_LOG("fw_buf_stage: HDP flush unavailable; slot %#llx..%#llx quarantined",
+                (unsigned long long)slot_off,
+                (unsigned long long)(slot_off + slot_sz));
+        return kIOReturnNotReady;
+    }
     psp.fwBufBumpOffset = slot_off + slot_sz;
     *outBusAddr = slot_mc;
 
