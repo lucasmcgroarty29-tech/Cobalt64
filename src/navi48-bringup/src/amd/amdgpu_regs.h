@@ -16,6 +16,7 @@
 #include <IOKit/IOReturn.h>
 #include "amdgpu_ip.h"
 #include "amdgpu_range_bounds.h"
+#include "hdp_flush_policy.h"
 
 // Cast-clean version of the reference macro (identical arithmetic; avoids
 // -Wsign-conversion noise from int-typed mask/shift constants).
@@ -220,9 +221,7 @@ static inline bool amdgpu_hdp_flush(const DeviceContext &ctx) {
         r2 = RREG32(ctx, SOC15_REG_OFFSET_BIDX(ctx, IPBlock::NBIO, 2, NBIORegs::BIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL));
     if (ctx.ip.isResolved(IPBlock::NBIO, 0))
         r0 = RREG32(ctx, SOC15_REG_OFFSET_BIDX(ctx, IPBlock::NBIO, 0, NBIORegs::BIF_BX0_REMAP_HDP_MEM_FLUSH_CNTL));
-    auto plausible = [&](uint32_t v) { return v != 0 && v != 0xFFFFFFFFu && (v & 3) == 0 && (size_t)v + 4 <= ctx.rmmioSize; };
-    remap = plausible(r2) ? r2 : (plausible(r0) ? r0 : 0);
-    const bool usable = remap != 0;
+    const bool usable = amdgpu_hdp_flush_select_window(r2, r0, ctx.rmmioSize, &remap);
     if (!logged) { logged = true; IOLog("Navi48Bringup: hdp: REMAP_HDP_MEM_FLUSH_CNTL idx2=0x%08x idx0=0x%08x -> %s (0x%x)\n", r2, r0, usable ? "flush via remap window" : "no flush window; HDP flush writes skipped", remap); }
     if (usable) ctx.rmmio[remap / 4] = 0;
     const uint32_t readback = RREG32(ctx, 0x0DE3);
