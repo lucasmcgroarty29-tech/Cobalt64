@@ -710,3 +710,10 @@ Before SDMA storage is re-used during initialisation, QUEUE0 RB_ENABLE and IB_EN
 ## Armed legacy CP ring and active SDMA storage lifetime (2026-11-17)
 
 The legacy CP_RB0 path now records when RB_ACTIVE and its doorbell have been armed. That backing is not released or reinitialised while the legacy ring remains armed, and the legacy and MES-mapped GFX paths cannot be mixed on the same CPContext. SDMA storage release is likewise refused while the software instance still reports its queue enabled, even if no explicit fence timeout was recorded.
+
+
+## Final SDMA SRBM and legacy CP fail-stop details (2026-11-17)
+
+The SRBM self-test no longer restores its target register after a command may still be active. It restores immediately when ring staging fails before WPTR publication, and after a successful fence; it leaves the register untouched when WPTR publication or completion is uncertain, while retaining the IB backing. This avoids racing a late SDMA write with the diagnostic's cleanup write.
+
+The legacy CPInit path now returns any failed ring-fetch probe result rather than continuing to a misleading `CP ready` log. The host workflow has been widened to all AMD driver sources and includes a static guard against standalone unchecked HDP flush calls and unchecked SDMA writeback calls, followed by allocator/lifecycle tests and ThreadSanitizer.
