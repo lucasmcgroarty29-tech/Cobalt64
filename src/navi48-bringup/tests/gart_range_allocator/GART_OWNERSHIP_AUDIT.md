@@ -700,3 +700,8 @@ The PDB0 diagnostic now distinguishes a failed SDMA completion from an unavailab
 ## Prevent mutation of already-mapped CP queue state (2026-11-17)
 
 The GFX and MEC queue paths now refuse to rewrite an MQD or issue a duplicate MES ADD_QUEUE while the corresponding queue is already mapped. This complements the release guards: mapped storage remains owned until an acknowledged unmap clears the mapping state, and uncertain mappings remain quarantined.
+
+
+## SDMA warm-start queue stop acknowledgement (2026-11-17)
+
+Before SDMA storage is re-used during initialisation, QUEUE0 RB_ENABLE and IB_ENABLE must both read back clear after the stop writes. If either remains set, initialisation marks the instance uncertain and aborts before allocating/reusing ring backing. A previously uncertain instance is also refused at the start of `sdma_init_full`; the software `enabled` flag is cleared only after the hardware disable is acknowledged.
