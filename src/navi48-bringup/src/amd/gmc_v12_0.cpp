@@ -2198,7 +2198,11 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
         bar0_memset_vram(dev, srcOff, pattern, kVMFragCopyBytes);
         bar0_memset_vram(dev, dstOff, 0xDEADBEEFu, kVMFragCopyBytes);
         amdgpu_hdp_flush(dev);
-        (void)gmc_flush_gpu_tlb(dev, gmc, h, /*vmid*/ 1, /*type*/ 0);
+        const kern_return_t flush = gmc_flush_gpu_tlb(dev, gmc, h, /*vmid*/ 1, /*type*/ 0);
+        if (flush != kIOReturnSuccess) {
+            GMC_LOG("vmfrag %s: VMID-1 TLB invalidation failed %#x — refusing to submit", name, flush);
+            return false;
+        }
         gmc_clear_vm_faults(dev, gmc);
         const kern_return_t r =
             sdma_ib_copy_linear_test(dev, inst, ibVa, ibOff, srcVa, dstVa,
@@ -2290,8 +2294,22 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     WREG32(dev, en_lo_reg,   saved[5]);
     WREG32(dev, en_hi_reg,   saved[6]);
     amdgpu_hdp_flush(dev);
-    (void)gmc_flush_gpu_tlb(dev, gmc, h, /*vmid*/ 1, /*type*/ 0);
-    gmc_clear_vm_faults(dev, gmc);
+    const kern_return_t restoreFlush =
+        gmc_flush_gpu_tlb(dev, gmc, h, /*vmid*/ 1, /*type*/ 0);
+    gmc_clear_vm_faults(dev);
+    if (restoreFlush != kIOReturnSuccess) {
+        // The old VMID-1 translation may still reference the temporary table
+        // or data allocation. Keep both ranges allocated rather than allowing
+        // the VRAM allocator to hand them to an unrelated client.
+        t.restore_tlb_failed = true;
+        t.allocations_quarantined = true;
+        GMC_LOG("vmfrag: CONTEXT1 restored in registers but VMID-1 TLB flush failed %#x — "
+                "quarantining table %#llx and data %#llx; they will NOT be freed",
+                restoreFlush, (unsigned long long)tbl.gpu_va,
+                (unsigned long long)data.gpu_va);
+        if (out) *out = t;
+        return restoreFlush;
+    }
     gmc.vram_alloc.free(data);
     gmc.vram_alloc.free(tbl);
 
