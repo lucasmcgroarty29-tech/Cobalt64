@@ -588,3 +588,12 @@ This closes a software bookkeeping gap in the fail-closed path. It remains sourc
 The VMFrag diagnostic's per-leg source/destination staging now stops before TLB invalidation or SDMA submission if HDP cannot be issued. Its CONTEXT1 restore path treats an unavailable HDP flush exactly like a failed TLB acknowledgement and quarantines the temporary table/data allocations rather than freeing them under uncertain translations.
 
 GFXHUB GART initialization now propagates the HDP result and refuses to publish readiness before the VMID-0 TLB invalidation if the flush window is unavailable. The PDB0 self-test refuses its SDMA copy when its source staging flush fails, and the compute-ring self-test now propagates the checked GMC HDP status before submitting its IB.
+
+
+## SDMA and CP pointer-publication ordering follow-up (2026-11-17)
+
+The SDMA queue-0 and queue-1 kick paths now preflight HDP before writing a writeback pointer that the engine may poll, then re-check the flush result before issuing the doorbell/MMIO publication path. The primary SDMA ring writer also leaves its committed software pointer unchanged if the ring-content flush is unavailable.
+
+The central CP doorbell helper now drains staged ring writes before updating the writeback WPTR shadow. The direct compute-queue submit path similarly stages its next pointer locally, checks HDP, and only then commits the pointer and rings the doorbell. This avoids publishing a new WPTR shadow before the checked ring-content flush.
+
+The remaining unchecked HDP calls in CP/SDMA test paths are followed by these central checked submission gates, or are readback/diagnostic operations. The SDMA VRAM writeback read helper still has a best-effort flush before a diagnostic read and should be converted to an explicit invalid-read sentinel in a later pass.
