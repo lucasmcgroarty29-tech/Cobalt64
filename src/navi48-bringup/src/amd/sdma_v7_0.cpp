@@ -97,8 +97,10 @@ sdma_wb_read32(const DeviceContext &dev, const SDMAInstance &inst,
 {
     if (!amdgpu_range_fits(kSDMAWBPageBytes, byte_offset, 4)) return 0xFFFFFFFFu;
     if (inst.wb_in_vram) {
-        // Drain HDP so the CPU-side read sees what the engine wrote.
-        amdgpu_hdp_flush(dev);
+        // Drain HDP so the CPU-side read sees what the engine wrote. A missing
+        // remap window makes this observation untrustworthy, so return the
+        // helper's invalid-read sentinel instead of stale-looking data.
+        if (!amdgpu_hdp_flush(dev)) return 0xFFFFFFFFu;
         return RBAR0_32(dev, inst.wb_vram_off + byte_offset);
     }
     if (inst.wb_cpu == nullptr) return 0xFFFFFFFFu;
