@@ -1907,15 +1907,22 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
         gmc.gart_bump_offset > gmc.gart_size)
         return kIOReturnNotReady;
 
-    const uint64_t endOffset = gartOffset + rounded;
-    if (gartOffset < gmc.gart_bump_offset &&
-        endOffset > gmc.gart_bump_start) {
-        GMC_LOG("bind_at: [%#llx..%#llx) overlaps this driver's own bump region "
+    // In HIGH mode the entire [bump_start, gart_size) aperture is reserved
+    // for this driver's bump allocator, even before its first allocation.
+    // In legacy LOW mode, only the already-consumed [0, bump_offset) interval
+    // is protected, preserving the documented Apple-page contention behaviour.
+    const uint64_t reservedEnd = gmc.gart_bump_start != 0
+        ? gmc.gart_size : gmc.gart_bump_offset;
+    const uint64_t reservedSize = reservedEnd - gmc.gart_bump_start;
+    if (gart_ranges_overlap(gmc.gart_size, gartOffset, rounded,
+                           gmc.gart_bump_start, reservedSize)) {
+        const uint64_t endOffset = gartOffset + rounded;
+        GMC_LOG("bind_at: [%#llx..%#llx) overlaps reserved bump region "
                 "[%#llx..%#llx) — REFUSING",
                 (unsigned long long)gartOffset,
                 (unsigned long long)endOffset,
                 (unsigned long long)gmc.gart_bump_start,
-                (unsigned long long)gmc.gart_bump_offset);
+                (unsigned long long)reservedEnd);
         gBindAtOverlapRefusals++;
         return kIOReturnBusy;
     }
