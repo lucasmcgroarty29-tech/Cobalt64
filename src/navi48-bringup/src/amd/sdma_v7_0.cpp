@@ -1281,7 +1281,8 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
 
     if (sdma_ring_write(dev, inst, pkt, n) != n) {
         SDMA_LOG("srbm-test: %s %s — ring_write failed", tag, srbm_leg_name(leg));
-        if (!inst.submission_uncertain) WREG32(dev, tr.reg_dw, tr.before);
+        // No WPTR was published; the temporary register clear is safe to undo.
+        WREG32(dev, tr.reg_dw, tr.before);
         return false;
     }
     if (sdma_kick_doorbell(dev, inst) != kIOReturnSuccess) {
