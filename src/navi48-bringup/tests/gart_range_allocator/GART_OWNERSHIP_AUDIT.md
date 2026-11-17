@@ -717,3 +717,8 @@ The legacy CP_RB0 path now records when RB_ACTIVE and its doorbell have been arm
 The SRBM self-test no longer restores its target register after a command may still be active. It restores immediately when ring staging fails before WPTR publication, and after a successful fence; it leaves the register untouched when WPTR publication or completion is uncertain, while retaining the IB backing. This avoids racing a late SDMA write with the diagnostic's cleanup write.
 
 The legacy CPInit path now returns any failed ring-fetch probe result rather than continuing to a misleading `CP ready` log. The host workflow has been widened to all AMD driver sources and includes a static guard against standalone unchecked HDP flush calls and unchecked SDMA writeback calls, followed by allocator/lifecycle tests and ThreadSanitizer.
+
+
+## Fail-stop entry gates for follow-on diagnostics (2026-11-17)
+
+After `submission_uncertain` is set, SDMA writeback writes, ring tests, constant-fill/copy/IB-copy helpers, VRAM copy tests, sweeps and SRBM diagnostics now refuse entry before allocating or staging additional work. VMFrag similarly skips before allocating a second test table. The PM4 bring-up caller now stops immediately when the initial CP ring-fetch probe has an unconfirmed completion, rather than attempting another ring test against a potentially active queue.
