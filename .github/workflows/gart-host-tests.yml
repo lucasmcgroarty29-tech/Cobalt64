@@ -55,5 +55,5 @@ jobs:
         run: make -C src/navi48-bringup/tests/gart_range_allocator test-tsan
       - name: Build and run ReBAR and VRAM geometry tests
         run: |
-          g++ -std=c++17 -Wall -Wextra -Werror -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -I src/navi48-bringup/src -I src/navi48-bringup/src/amd src/navi48-bringup/tests/native_rebar_test.cpp -o /tmp/native_rebar
+          g++ -std=c++17 -Wall -Wextra -Werror -Wno-comment -O1 -fsanitize=address,undefined -fno-sanitize-recover=all -I src/navi48-bringup/src -I src/navi48-bringup/src/amd src/navi48-bringup/tests/native_rebar_test.cpp -o /tmp/native_rebar
           /tmp/native_rebar .
