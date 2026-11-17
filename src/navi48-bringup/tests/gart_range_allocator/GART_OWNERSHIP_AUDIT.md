@@ -630,3 +630,10 @@ The Queue-1 self-test now refuses to program the external queue if its fence wri
 The SDMA VRAM-copy test no longer reads or frees source/destination allocations after a non-successful fence wait; a failed wait does not prove the engine has stopped accessing them, so both ranges are retained. The multi-case VRAM sweep similarly aborts and retains its whole region when a copy does not complete, or when an HDP staging/readback acknowledgement is unavailable.
 
 The VMFrag diagnostic now treats any non-successful SDMA IB completion as uncertain ownership: it skips readback, does not rewrite the page table for a polarity retry or later leg, restores CONTEXT1, and retains the table/data allocations even if the restore TLB invalidation succeeds. A failed restore invalidation continues to retain the allocations as before. This is deliberately conservative until a positively acknowledged queue reset can prove the engine no longer references the ranges.
+
+
+## SDMA copy-test ownership after timeout (2026-11-17)
+
+The VRAM-copy test now retains both source and destination allocations whenever the fence wait does not complete successfully; a timeout or failed submission is not proof that DMA has stopped. The multi-case sweep also stops and retains its region on any non-successful copy instead of reading potentially active memory and recycling it. Staging and both readback flush points are checked, and an unacknowledged flush aborts the diagnostic with its region retained.
+
+The SDMA writeback accessor now has a checked boolean result in both declaration and definition. All callers check invalid offsets/missing mappings; queue WPTR writes are staged first and followed by the existing checked HDP drain before publication. The SRBM leg correctly returns `false` on a failed fence-slot write rather than converting a nonzero IOReturn into boolean success.
