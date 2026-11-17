@@ -2429,7 +2429,20 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                 (t.nv_fault_lo >> 20) & 0xfu, t.nv_fault_addr_lo);
     }
 
-    // ---- restore CONTEXT1, always ---------------------------------------
+    // ---- restore CONTEXT1 only when SDMA is known to be idle ------------
+    if (dmaCompletionUncertain) {
+        // Reprogramming VMID 1 while an uncompleted SDMA IB may still be using
+        // it could redirect that command into unrelated address space. Keep
+        // the test context and its backing intact until a positively
+        // acknowledged queue reset can make restoration safe.
+        t.allocations_quarantined = true;
+        GMC_LOG("vmfrag: SDMA completion is unconfirmed (%#x); leaving CONTEXT1 on the retained test table and retaining table/data %#llx / %#llx",
+                dmaUncertainResult, (unsigned long long)tbl.gpu_va,
+                (unsigned long long)data.gpu_va);
+        if (out) *out = t;
+        return dmaUncertainResult;
+    }
+
     WREG32(dev, cntl_reg,    saved[0]);
     WREG32(dev, base_lo_reg, saved[1]);
     WREG32(dev, base_hi_reg, saved[2]);
@@ -2454,14 +2467,6 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                 (unsigned long long)data.gpu_va);
         if (out) *out = t;
         return restoreFlush;
-    }
-    if (dmaCompletionUncertain) {
-        t.allocations_quarantined = true;
-        GMC_LOG("vmfrag: CONTEXT1 registers and VMID-1 TLB restored, but SDMA completion was not acknowledged (%#x) — table %#llx and data %#llx remain allocated",
-                dmaUncertainResult, (unsigned long long)tbl.gpu_va,
-                (unsigned long long)data.gpu_va);
-        if (out) *out = t;
-        return dmaUncertainResult;
     }
     gmc.vram_alloc.free(data);
     gmc.vram_alloc.free(tbl);
