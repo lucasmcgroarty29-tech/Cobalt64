@@ -279,20 +279,38 @@ gmc_mc_init(DeviceContext &dev, GMCContext &gmc)
         }
     }
 
+    if (gmc.real_vram_size == 0) {
+        GMC_LOG("mc_init: refusing zero-sized VRAM geometry");
+        return kIOReturnNoMemory;
+    }
+
+    // Validate every derived MC interval before publishing any of it. These
+    // values feed page-table and aperture programming later in bring-up.
+    uint64_t vram_end = 0;
+    uint64_t vram_end_exclusive = 0;
+    uint64_t gart_start = 0;
+    uint64_t gart_end = 0;
+    if (!amdgpu_checked_add_u64(vram_start_actual,
+                                gmc.real_vram_size - 1, &vram_end) ||
+        !amdgpu_checked_add_u64(vram_end, 1, &vram_end_exclusive) ||
+        !amdgpu_checked_align_up_u64(vram_end_exclusive,
+                                     kGARTAlignment, &gart_start) ||
+        !amdgpu_checked_add_u64(gart_start,
+                                kGARTInitialSize - 1, &gart_end)) {
+        GMC_LOG("mc_init: refusing overflowing VRAM/GART geometry (base=%#llx size=%#llx)",
+                (unsigned long long)vram_start_actual,
+                (unsigned long long)gmc.real_vram_size);
+        return kIOReturnBadArgument;
+    }
+
     gmc.vram_start       = vram_start_actual;
-    gmc.vram_end         = vram_start_actual + gmc.real_vram_size - 1;
+    gmc.vram_end         = vram_end;
     gmc.fb_start         = gmc.vram_start;
     gmc.fb_end           = gmc.vram_end;
     gmc.vram_base_offset = vram_base_offset_actual;
-
-    // GART aperture starts above VRAM. Upstream amdgpu_gmc_gart_location
-    // uses ALIGN(mc->vram_end + 1, four_gb); the reference used a 16 KiB
-    // align, which coincides on its hardware but not on ours — see
-    // Deviation 5.
-    gmc.gart_size  = kGARTInitialSize;
-    gmc.gart_start = (gmc.vram_end + 1 + kGARTAlignment - 1)
-                     & ~(kGARTAlignment - 1);
-    gmc.gart_end   = gmc.gart_start + gmc.gart_size - 1;
+    gmc.gart_size        = kGARTInitialSize;
+    gmc.gart_start       = gart_start;
+    gmc.gart_end         = gart_end;
 
     // VM manager params for GFX12: 4-level page tables (num_level=3
     // means depth 3, i.e. 4 levels counting root), 512-entry blocks
