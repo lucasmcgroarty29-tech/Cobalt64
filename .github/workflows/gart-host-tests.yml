@@ -43,3 +43,5 @@ jobs:
           sudo apt-get install --yes g++ make
       - name: Build and run allocator and lifecycle tests
         run: make -C src/navi48-bringup/tests/gart_range_allocator clean test
+      - name: Run ThreadSanitizer concurrency tests
+        run: make -C src/navi48-bringup/tests/gart_range_allocator test-tsan
