@@ -324,6 +324,11 @@ void
 sdma_release_storage(GMCContext &gmc, SDMAInstance &inst)
 {
     if (!inst.inited) return;
+    if (inst.submission_uncertain) {
+        SDMA_LOG("instance %u: release_storage refused — DMA ownership is uncertain; ring and writeback backing remain quarantined",
+                 inst.instance);
+        return;
+    }
     if (gmc.vram_alloc.is_inited()) {
         VRAMAllocation a{};
         a.gpu_va = inst.ring_gpu_va;
@@ -430,7 +435,7 @@ static inline uint32_t order_base_2(uint32_t x)
 kern_return_t
 sdma_gfx_resume_instance(const DeviceContext &dev, SDMAInstance &inst)
 {
-    if (!inst.inited) return kIOReturnNotReady;
+    if (!inst.inited || inst.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
 
     const uint32_t i = inst.instance;
