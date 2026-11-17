@@ -103,8 +103,7 @@ public:
             return false;
         if ((alignment & (alignment - 1ULL)) != 0) return false;
         if (alignment < 16384) alignment = 16384;
-        if (
-            bytes > UINT64_MAX - (alignment - 1ULL))
+        if (bytes > UINT64_MAX - (alignment - 1ULL))
             return false;
         const uint64_t rounded = (bytes + alignment - 1ULL) & ~(alignment - 1ULL);
         if (rounded == 0 || m_bytes_used > m_size ||
