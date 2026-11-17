@@ -66,17 +66,20 @@ driver layer.
 
 A separate host-side `GARTMappingLifecycle` helper now models the required
 ordering: `UNMAPPED -> PTE_WRITTEN -> MAPPED -> IN_FLIGHT -> RETIRING ->
-QUIESCENT -> PTES_CLEARED -> REUSABLE`. It counts in-flight uses, blocks new
-uses after retirement begins, and supports a fail-closed `QUARANTINED` state.
-It does not execute any of the hardware operations represented by those
-transitions and is not yet connected to the kext. Callers must serialize its
-state changes.
+QUIESCENT -> PTE_CLEAR_WRITTEN -> HDP_FLUSHED -> TLB_INVALIDATED -> REUSABLE`.
+The caller supplies a non-zero context mask identifying every hub/VMID pair
+that may cache the mapping. It counts in-flight uses, blocks new uses after
+retirement begins, and supports a fail-closed `QUARANTINED` state. It does not
+execute any hardware operations and is not connected to the kext. Callers must
+serialize its state changes.
 
 Run its host suite with `make -C src/navi48-bringup/tests/gart_range_allocator test`.
 The suite includes deterministic reuse/coalescing, invalid-input and metadata
 capacity checks, plus 50,000 randomized allocate/free operations with full
-aperture accounting. The updated granularity checks have been added to the
-suite; they still need a fresh run after this API change.
+aperture accounting. The GitHub Actions host-test workflow has run successfully
+on the updated allocator and lifecycle code, with AddressSanitizer and
+UndefinedBehaviorSanitizer enabled. It reports four allocator test groups and
+three lifecycle test groups passed. This does not compile or validate the kext.
 
 ## Next safe engineering step
 
