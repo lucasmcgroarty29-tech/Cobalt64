@@ -915,7 +915,9 @@ kern_return_t cp_kiq_smoke_test(DeviceContext &dev,
 // amdgpu_mes_map_legacy_queue with queue_type COMPUTE.
 struct ComputeQueue {
     bool      inited { false };
-    bool      mapped { false };     // MES acked ADD_QUEUE
+    bool      mapped { false };
+    // Sticky fail-stop after a published compute command does not retire.
+    bool      submission_uncertain { false };     // MES acked ADD_QUEUE
 
     SysMem    ring_sys {};  uint64_t ring_bus { 0 };  void *ring_cpu { nullptr };
     SysMem    mqd_sys  {};  uint64_t mqd_bus  { 0 };  void *mqd_cpu  { nullptr };
@@ -959,7 +961,7 @@ kern_return_t cp_compute_queue_map_mes(const DeviceContext &dev, ComputeQueue &c
 kern_return_t cp_compute_submit_ib(const DeviceContext &dev, ComputeQueue &cq,
                                    uint64_t ib_gpu_va, uint32_t length_dw,
                                    uint32_t vmid, uint32_t *out_fence);
-kern_return_t cp_compute_wait_fence(const ComputeQueue &cq, uint32_t fence,
+kern_return_t cp_compute_wait_fence(ComputeQueue &cq, uint32_t fence,
                                     uint64_t timeout_us, uint64_t *observed,
                                     uint64_t *elapsed_us);
 void cp_compute_queue_release(GMCContext &gmc, ComputeQueue &cq);

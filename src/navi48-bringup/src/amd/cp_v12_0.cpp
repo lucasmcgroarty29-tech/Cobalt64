@@ -2720,6 +2720,10 @@ void
 cp_compute_queue_release(GMCContext &gmc, ComputeQueue &cq)
 {
     (void)gmc;
+    if (cq.submission_uncertain) {
+        CP_LOG("compute queue release refused — command completion is uncertain; ring/MQD/EOP/WB backing remains quarantined");
+        return;
+    }
     sysmem_free(cq.ring_sys); sysmem_free(cq.mqd_sys);
     sysmem_free(cq.eop_sys);  sysmem_free(cq.wb_sys);
     cq = ComputeQueue{};
@@ -2728,7 +2732,7 @@ cp_compute_queue_release(GMCContext &gmc, ComputeQueue &cq)
 kern_return_t
 cp_compute_mqd_init(const DeviceContext &dev, ComputeQueue &cq)
 {
-    if (!cq.inited || cq.mqd_cpu == nullptr) return kIOReturnNotReady;
+    if (!cq.inited || cq.submission_uncertain || cq.mqd_cpu == nullptr) return kIOReturnNotReady;
     namespace M = ComputeMqdOff;
 
     uint32_t *m = static_cast<uint32_t *>(cq.mqd_cpu);
@@ -2836,7 +2840,7 @@ cp_compute_mqd_init(const DeviceContext &dev, ComputeQueue &cq)
 kern_return_t
 cp_compute_queue_map_mes(const DeviceContext &dev, ComputeQueue &cq, MESContext &mes)
 {
-    if (!cq.inited) return kIOReturnNotReady;
+    if (!cq.inited || cq.submission_uncertain) return kIOReturnNotReady;
     if (!mes.pipe[0].inited || !mes.pipe[0].enabled) {
         CP_LOG("compute_queue_map: the MES scheduler is not running");
         return kIOReturnNotReady;
@@ -2880,7 +2884,7 @@ kern_return_t
 cp_compute_submit_ib(const DeviceContext &dev, ComputeQueue &cq, uint64_t ib_gpu_va,
                      uint32_t length_dw, uint32_t vmid, uint32_t *out_fence)
 {
-    if (!cq.inited || cq.fence_cpu == nullptr) return kIOReturnNotReady;
+    if (!cq.inited || cq.submission_uncertain || cq.fence_cpu == nullptr) return kIOReturnNotReady;
     if (length_dw == 0 || length_dw > 0xFFFFFu) return kIOReturnBadArgument;
     if ((ib_gpu_va & 0x3ull) != 0 || vmid > 15) return kIOReturnBadArgument;
 
@@ -2954,7 +2958,7 @@ cp_compute_submit_ib(const DeviceContext &dev, ComputeQueue &cq, uint64_t ib_gpu
 }
 
 kern_return_t
-cp_compute_wait_fence(const ComputeQueue &cq, uint32_t fence, uint64_t timeout_us,
+cp_compute_wait_fence(ComputeQueue &cq, uint32_t fence, uint64_t timeout_us,
                       uint64_t *observed, uint64_t *elapsed_us)
 {
     if (!cq.inited || cq.fence_cpu == nullptr) return kIOReturnNotReady;
@@ -2971,7 +2975,9 @@ cp_compute_wait_fence(const ComputeQueue &cq, uint32_t fence, uint64_t timeout_u
     v = *cq.fence_cpu;
     if (observed)   *observed = v;
     if (elapsed_us) *elapsed_us = elapsed;
-    return ((v & 0xFFFFFFFFull) >= fence) ? kIOReturnSuccess : kIOReturnTimeout;
+    const bool complete = (v & 0xFFFFFFFFull) >= fence;
+    if (!complete) cq.submission_uncertain = true;
+    return complete ? kIOReturnSuccess : kIOReturnTimeout;
 }
 
 void
