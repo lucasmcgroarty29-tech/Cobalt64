@@ -1281,11 +1281,11 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
 
     if (sdma_ring_write(dev, inst, pkt, n) != n) {
         SDMA_LOG("srbm-test: %s %s — ring_write failed", tag, srbm_leg_name(leg));
-        WREG32(dev, tr.reg_dw, tr.before);
+        if (!inst.submission_uncertain) WREG32(dev, tr.reg_dw, tr.before);
         return false;
     }
     if (sdma_kick_doorbell(dev, inst) != kIOReturnSuccess) {
-        WREG32(dev, tr.reg_dw, tr.before);
+        if (!inst.submission_uncertain) WREG32(dev, tr.reg_dw, tr.before);
         return false;
     }
 
@@ -1311,8 +1311,8 @@ srbm_run_leg(const DeviceContext &dev, SDMAInstance &inst,
              tr.readback[leg], tr.value);
     if (!tr.fenced[leg]) sdma_log_status(dev, inst.instance);
 
-    // Always put the register back the way we found it.
-    WREG32(dev, tr.reg_dw, tr.before);
+    // Restore only after the fence proves the command is no longer active.
+    if (!inst.submission_uncertain) WREG32(dev, tr.reg_dw, tr.before);
     return tr.landed[leg];
 }
 
@@ -1359,7 +1359,9 @@ srbm_run_target(const DeviceContext &dev, SDMAInstance &inst,
         (void)srbm_run_leg(dev, inst, tr, 4, true, tr.landed[1], false, clear,
                            ib_gpu_va, ib_vram_off, tag, ibStagingUncertain);
 
-    WREG32(dev, tr.reg_dw, tr.before);
+    if (!inst.submission_uncertain &&
+        !(ibStagingUncertain && *ibStagingUncertain))
+        WREG32(dev, tr.reg_dw, tr.before);
 }
 
 kern_return_t
