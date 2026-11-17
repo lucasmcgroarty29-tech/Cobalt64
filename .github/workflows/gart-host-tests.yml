@@ -5,6 +5,7 @@ on:
     branches:
       - lucas-development
     paths:
+      - "src/navi48-bringup/src/amd/**"
       - "src/navi48-bringup/src/amd/gart_range_allocator.*"
       - "src/navi48-bringup/src/amd/gart_mapping_lifecycle.*"
       - "src/navi48-bringup/src/amd/gart_range_bounds.h"
@@ -27,6 +28,7 @@ on:
       - ".github/workflows/gart-host-tests.yml"
   pull_request:
     paths:
+      - "src/navi48-bringup/src/amd/**"
       - "src/navi48-bringup/src/amd/gart_range_allocator.*"
       - "src/navi48-bringup/src/amd/gart_mapping_lifecycle.*"
       - "src/navi48-bringup/src/amd/rebar_pure.h"
@@ -52,6 +54,19 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes g++ make
+      - name: Reject unchecked HDP and SDMA writeback calls
+        run: |
+          if grep -RInE '^[[:space:]]*(amdgpu_hdp_flush|gmc_hdp_flush)\([^;]*\);[[:space:]]*        run: make -C src/navi48-bringup/tests/gart_range_allocator clean test
+      - name: Run ThreadSanitizer concurrency tests
+        run: make -C src/navi48-bringup/tests/gart_range_allocator test-tsan
+ src/navi48-bringup/src; then
+            echo "::error::Unchecked HDP flush call found"
+            exit 1
+          fi
+          if grep -RInE '^[[:space:]]*sdma_wb_write32\(' src/navi48-bringup/src; then
+            echo "::error::Unchecked SDMA writeback call found"
+            exit 1
+          fi
       - name: Build and run allocator and lifecycle tests
         run: make -C src/navi48-bringup/tests/gart_range_allocator clean test
       - name: Run ThreadSanitizer concurrency tests
