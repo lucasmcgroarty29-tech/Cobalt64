@@ -132,6 +132,9 @@
 
 namespace amdgpu {
 
+static_assert(kAMDGPUGPUPageSize == 4096,
+              "GART checked bounds helpers require 4 KiB GPU pages");
+
 // ----- Constants -----
 //
 // The reference hardcoded the R9700's 32 GiB total and took the visible
