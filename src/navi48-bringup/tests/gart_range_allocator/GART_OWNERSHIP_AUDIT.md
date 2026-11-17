@@ -259,9 +259,12 @@ BAR5 register accessors, BAR0/BAR2 accessors and bulk BAR0 copy/set helpers chec
 `offset + length > mapped_size`. That addition can wrap before the comparison.
 They now use a shared subtraction-based `amdgpu_range_fits` check, which
 requires `offset <= total` and `length <= total - offset`. The same guard
-now bounds MM_INDEX VRAM dword reads/writes against the full VRAM size, and
+bounds MM_INDEX VRAM dword reads/writes against the full VRAM size, and
 `vram_memcpy` validates the requested span before either the BAR0 or MM_INDEX
-path. The generic helper is host-tested through the GART bounds suite.
+path. BAR0 copy tails are written byte-by-byte instead of using a final
+32-bit store that could overrun a short request. Non-zero bulk copies reject
+a null source pointer. The generic helper is host-tested through the GART
+bounds suite.
 
 This change hardens common memory-access bounds but is still only source-level
 review plus host tests of the arithmetic primitive. The IOKit register header
