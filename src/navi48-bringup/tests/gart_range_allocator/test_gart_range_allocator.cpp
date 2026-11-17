@@ -36,10 +36,77 @@ static void capacity_failure_is_atomic() {
     assert(a.count == 1 && a.ranges[0].offset == 0x1000 && a.ranges[0].size == 0xF000);
 }
 
+
+static uint32_t next_random(uint32_t *state) {
+    *state ^= *state << 13;
+    *state ^= *state >> 17;
+    *state ^= *state << 5;
+    return *state;
+}
+
+static void randomized_accounting_stress() {
+    static constexpr uint64_t page = 0x1000;
+    static constexpr uint64_t aperture = 0x100000;
+    struct LiveRange { uint64_t offset; uint64_t size; bool live; };
+    GARTFreeRange slots[512]{};
+    GARTRangeAllocator a{};
+    LiveRange live[256]{};
+    uint32_t rng = 0x91e10da5u;
+    assert(gart_range_allocator_init(&a, slots, 512, aperture));
+
+    for (unsigned step = 0; step < 50000; ++step) {
+        const unsigned index = next_random(&rng) % 256u;
+        if (live[index].live) {
+            assert(gart_range_allocator_free(&a, live[index].offset, live[index].size));
+            live[index].live = false;
+        } else {
+            const uint64_t pages = 1u + (next_random(&rng) % 16u);
+            const uint64_t align_pages = 1ull << (next_random(&rng) % 5u);
+            uint64_t offset = 0;
+            if (gart_range_allocator_alloc(&a, pages * page,
+                                           align_pages * page, &offset)) {
+                live[index] = {offset, pages * page, true};
+            }
+        }
+
+        uint64_t accounted = 0;
+        uint64_t previous_end = 0;
+        for (size_t i = 0; i < a.count; ++i) {
+            const uint64_t end = a.ranges[i].offset + a.ranges[i].size;
+            assert(a.ranges[i].size != 0);
+            assert(end <= aperture);
+            assert(i == 0 || a.ranges[i].offset > previous_end);
+            accounted += a.ranges[i].size;
+            previous_end = end;
+        }
+        for (unsigned i = 0; i < 256; ++i) {
+            if (!live[i].live) continue;
+            assert(live[i].size != 0);
+            assert(live[i].offset + live[i].size <= aperture);
+            accounted += live[i].size;
+            for (size_t j = 0; j < a.count; ++j) {
+                const uint64_t free_end = a.ranges[j].offset + a.ranges[j].size;
+                const uint64_t live_end = live[i].offset + live[i].size;
+                assert(live_end <= a.ranges[j].offset ||
+                       live[i].offset >= free_end);
+            }
+            for (unsigned j = i + 1; j < 256; ++j) {
+                if (!live[j].live) continue;
+                const uint64_t other_end = live[j].offset + live[j].size;
+                const uint64_t live_end = live[i].offset + live[i].size;
+                assert(live_end <= live[j].offset ||
+                       live[i].offset >= other_end);
+            }
+        }
+        assert(accounted == aperture);
+    }
+}
+
 int main() {
     basic_reuse_and_coalesce();
     rejects_bad_inputs_and_double_free();
     capacity_failure_is_atomic();
-    puts("GART range allocator: 3 test groups passed");
+    randomized_accounting_stress();
+    puts("GART range allocator: 4 test groups passed");
     return 0;
 }
