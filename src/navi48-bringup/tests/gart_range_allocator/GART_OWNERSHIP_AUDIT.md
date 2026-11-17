@@ -611,3 +611,10 @@ The SDMA VRAM writeback read helper now returns its invalid-read sentinel when H
 The CP ring callers now restore their pre-submit software WPTR if the checked central doorbell gate refuses publication. The multi-part IB + EOP path also rolls back if either packet staging or the final kick fails; the EOP helper checks that its fence packet was actually staged. The ring-fetch probe and KIQ smoke path restore their starting pointer on kick failure. This prevents a later successful submission from accidentally publishing commands from an earlier call that returned NotReady.
 
 `cp_ring_write()` remains a staging helper and does not itself perform HDP I/O; the central `cp_kick_doorbell()` checks the ring-content flush before writing the polled WPTR shadow or doorbell. The direct compute-queue path has its own local next-WPTR transaction and checked pre-publication flush.
+
+
+## SDMA writeback helper and VMFrag table-staging follow-up (2026-11-17)
+
+`sdma_wb_write32()` now reports invalid offsets or missing CPU mappings instead of silently returning. VRAM writes are staged without an unchecked internal HDP flush; each queue-publication path checks both writeback dwords and then performs its checked HDP drain before doorbell/MMIO publication. Fence-slot initialisation callers also propagate mapping failure before staging/submitting work.
+
+The VMFrag table builder now returns a status and refuses to run either sub-table or 64 KiB-leaf tests when the page-table write flush is unavailable. If a retry table rebuild fails, later legs are skipped. CONTEXT1 restoration still performs a checked HDP + VMID-1 invalidation, and the temporary table/data allocations remain quarantined if that restore acknowledgement fails.
