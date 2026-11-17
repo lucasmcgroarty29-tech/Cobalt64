@@ -270,3 +270,34 @@ This change hardens common memory-access bounds but is still only source-level
 review plus host tests of the arithmetic primitive. The IOKit register header
 and hardware accessors are not compiled by the Linux host workflow, and no
 BAR access has been exercised on a GPU.
+
+
+## VRAM allocator synchronization and bounds (2026-11-17)
+
+A second allocator audit found that `VRAMBumpAllocator` still carried a
+DriverKit-era assumption that external-method calls were serialized per
+IOService. This fork is an IOKit kext with multiple entry paths, including
+`Navi48UserClient::externalMethod()` and Apple TTL callbacks. The allocator
+had no internal synchronization, while runtime code has multiple allocation
+and release call sites. It now uses a short internal atomic spin lock around
+initialization, allocation, free-list mutation and metadata getters. The lock
+covers allocator bookkeeping only; it performs no GPU, BAR, fence or memory
+allocation operation. Known call sites are thread-context paths, not interrupt
+handlers. The host suite now runs eight concurrent threads allocating and
+freeing from one allocator and verifies that all returned intervals are
+non-overlapping and accounting returns to zero.
+
+The same allocator audit also added overflow-safe initialization, alignment
+validation, checked size rounding, range-checked frees, overlap/double-free
+rejection, and bounds-safe free-list coalescing. Host tests cover invalid
+alignment, wrapping base/size, huge allocation requests, coalescing, duplicate
+free, out-of-range free, and concurrent access.
+
+The common range helper has also been applied to SDMA writeback and doorbell
+bounds, firmware payload slicing, MES firmware payload ranges, and PSP
+firmware/VRAM span checks. These source changes are covered by the host
+arithmetic suite, but the Linux workflow still does not compile the IOKit
+translation units or validate any hardware path. The separate GMC GART bump
+allocator remains a different structure and still has the unsynchronized
+runtime reservation issue documented above; the VRAM allocator lock does not
+solve it.
