@@ -6,6 +6,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
+#include "amdgpu_range_bounds.h"
 
 static inline bool gart_checked_page_span(uint64_t size_bytes,
                                           uint64_t *rounded_bytes,
@@ -30,8 +31,7 @@ static inline bool gart_checked_range(uint64_t total_bytes,
                                       uint64_t offset,
                                       uint64_t span_bytes)
 {
-    return span_bytes != 0 && offset <= total_bytes &&
-           span_bytes <= total_bytes - offset;
+    return span_bytes != 0 && amdgpu_range_fits(total_bytes, offset, span_bytes);
 }
 
 static inline bool gart_checked_pte_range(uint64_t table_bytes,
