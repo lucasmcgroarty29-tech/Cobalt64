@@ -396,3 +396,31 @@ all four host suites under AddressSanitizer/UndefinedBehaviorSanitizer and
 then reran the two concurrent suites under ThreadSanitizer, with no reported
 data races. This validates the host-side reservation and allocator models
 only; it does not compile or exercise the IOKit/GPU code that calls them.
+
+
+## VRAM allocation ownership and geometry hardening (2026-11-17)
+
+The visible-VRAM free-list now has a fixed 1024-entry allocation ledger in
+addition to its free-range list. Allocation reserves a ledger record before
+changing the free list; free requires an exact match of GPU address, rounded
+size, and alignment to a live record. This rejects partial frees and forged
+subranges that could otherwise release part of a still-live allocation.
+Ledger exhaustion fails closed, and a host test verifies the 1024-record limit
+can be recovered after all allocations are returned. The ledger is metadata
+only; it does not track GPU fences or prove that a BO is no longer in use.
+Callers must still ensure GPU work has completed before freeing a BO.
+
+VRAM/GART MC geometry now uses checked addition and checked power-of-two
+alignment before publishing `vram_end`, `gart_start`, and `gart_end`.
+Visible and high VRAM pool intervals are checked before allocator init.
+Partial visible/high-pool initialisation is retryable: an already-initialised
+visible pool no longer causes an early success return that silently skips a
+high pool which failed on the previous attempt. The pure ReBAR pool sizing
+helper now returns an empty interval rather than wrapping its base or reserve
+arithmetic.
+
+Host tests cover normal 256 MiB and 1 GiB pool layouts, overflow cases,
+partial/forged frees, allocation-ledger exhaustion and recovery, and existing
+concurrent allocation tests. These do not compile the IOKit translation unit;
+the checked GMC call-site edits remain source-audited only until a native
+macOS build is available.
