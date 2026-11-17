@@ -430,6 +430,10 @@ cp_alloc_storage(DeviceContext &dev, GMCContext &gmc, CPContext &cp)
 void
 cp_release_storage(CPContext &cp)
 {
+    if (cp.submission_uncertain) {
+        CP_LOG("storage release refused — CP command completion is uncertain; ring, MQD and WB backing remain quarantined");
+        return;
+    }
     // GART slots stay "used" — the GART bump allocator has no free — so the
     // PTEs keep pointing at memory we are about to hand back. Nothing reads
     // them until the page table is re-zeroed by GMC; same bump-only
@@ -460,7 +464,7 @@ cp_release_storage(CPContext &cp)
 uint32_t
 cp_ring_write(CPContext &cp, const uint32_t *src, uint32_t dwords)
 {
-    if (!cp.inited || src == nullptr || dwords == 0) return 0;
+    if (!cp.inited || cp.submission_uncertain || src == nullptr || dwords == 0) return 0;
     if (dwords > cp.ring_size_dwords / 2) {
         CP_LOG("ring_write: %u dwords exceeds half-ring %u",
                dwords, cp.ring_size_dwords / 2);
@@ -1808,7 +1812,7 @@ cp_map_gfx_kgq_mes(const DeviceContext &dev, CPContext &cp, MESContext &mes)
 kern_return_t
 cp_ring_test_scratch(const DeviceContext &dev, CPContext &cp, uint64_t timeout_us)
 {
-    if (!cp.inited) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC) ||
         !dev.ip.isResolved(IPBlock::GC, CPRegBaseIdx::SCRATCH_REG0))
         return kIOReturnNotReady;
@@ -1866,6 +1870,7 @@ cp_ring_test_scratch(const DeviceContext &dev, CPContext &cp, uint64_t timeout_u
            (unsigned long long)elapsed, v,
            RREG32(dev, CP_REG(dev, CP_RB0_RPTR)),
            cp.rptr_cpu ? *cp.rptr_cpu : 0u, cp.wptr);
+    cp.submission_uncertain = true;
     cp_dump_state(dev, cp, "ring_test timeout");
     return kIOReturnTimeout;
 }
@@ -1875,7 +1880,7 @@ kern_return_t
 cp_submit_ib(const DeviceContext &dev, CPContext &cp, uint64_t ib_gpu_va,
              uint32_t length_dw, uint32_t vmid, uint32_t *out_fence)
 {
-    if (!cp.inited || cp.fence_cpu == nullptr) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain || cp.fence_cpu == nullptr) return kIOReturnNotReady;
     if (length_dw == 0 || length_dw > 0xFFFFFu) return kIOReturnBadArgument;
     if ((ib_gpu_va & 0x3ull) != 0) return kIOReturnBadArgument;
     if (vmid > 15) return kIOReturnBadArgument;
@@ -1903,7 +1908,7 @@ cp_submit_ib(const DeviceContext &dev, CPContext &cp, uint64_t ib_gpu_va,
 }
 
 kern_return_t
-cp_wait_fence(const CPContext &cp, uint32_t fence, uint64_t timeout_us,
+cp_wait_fence(CPContext &cp, uint32_t fence, uint64_t timeout_us,
               uint64_t *observed, uint64_t *elapsed_us)
 {
     if (!cp.inited || cp.fence_cpu == nullptr) return kIOReturnNotReady;
@@ -1922,7 +1927,9 @@ cp_wait_fence(const CPContext &cp, uint32_t fence, uint64_t timeout_us,
     v = *cp.fence_cpu;
     if (observed)   *observed = v;
     if (elapsed_us) *elapsed_us = elapsed;
-    return ((v & 0xFFFFFFFFull) >= fence) ? kIOReturnSuccess : kIOReturnTimeout;
+    const bool complete = (v & 0xFFFFFFFFull) >= fence;
+    if (!complete) cp.submission_uncertain = true;
+    return complete ? kIOReturnSuccess : kIOReturnTimeout;
 }
 
 // ----- cp_set_eop_interrupt: gfx_v12_0_set_gfx_eop_interrupt_state -----
@@ -1964,7 +1971,7 @@ kern_return_t
 cp_ring_fetch_probe(const DeviceContext &dev, CPContext &cp,
                     uint32_t nops, uint64_t timeout_us)
 {
-    if (!cp.inited) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
     if (nops == 0) nops = 16;
     if (nops > cp.ring_size_dwords / 2) nops = cp.ring_size_dwords / 2;
@@ -2035,6 +2042,7 @@ cp_ring_fetch_probe(const DeviceContext &dev, CPContext &cp,
            "(rptr==0 means the CP never fetched a single dword)",
            (unsigned long long)elapsed, rptr_before_reg, rptr_reg,
            rptr_before_wb, rptr_wb, target);
+    cp.submission_uncertain = true;
     cp_dump_state(dev, cp, "ring_fetch_probe timeout");
     return kIOReturnTimeout;
 }
@@ -2226,9 +2234,9 @@ cp_enable(const DeviceContext &dev, bool enable)
 // the doorbell's upper dword untouched — the CP samples the pair as one
 // 64-bit wptr, so a half-write is not guaranteed to register at all.
 kern_return_t
-cp_kick_doorbell(const DeviceContext &dev, const CPContext &cp)
+cp_kick_doorbell(const DeviceContext &dev, CPContext &cp)
 {
-    if (!cp.inited) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
     if (dev.bar2 == nullptr) return kIOReturnNotAttached;
     if (cp.wb_cpu == nullptr) return kIOReturnNotReady;
 
@@ -2263,7 +2271,7 @@ cp_submit_eop_test(const DeviceContext &dev, CPContext &cp,
                    uint64_t timeout_us, uint32_t *outFence)
 {
     if (outFence) *outFence = 0;
-    if (!cp.inited) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain) return kIOReturnNotReady;
 
     const uint32_t startWptr = cp.wptr;
     uint32_t fence = cp_emit_eop_fence(cp);
@@ -2289,6 +2297,7 @@ cp_submit_eop_test(const DeviceContext &dev, CPContext &cp,
     }
     CP_LOG("EOP fence %u timeout (observed=%#llx, wb_rptr=%u, wptr=%u)",
            fence, (unsigned long long)*cp.fence_cpu, *cp.rptr_cpu, cp.wptr);
+    cp.submission_uncertain = true;
     cp_dump_state(dev, cp, "cp_submit_eop_test timeout");
     return kIOReturnTimeout;
 }
@@ -2333,8 +2342,8 @@ cp_kiq_smoke_test(DeviceContext &dev,
     if (out_fence_gpu_va)   *out_fence_gpu_va   = 0;
     if (out_observed_fence) *out_observed_fence = 0;
 
-    // (1) Bail if CP/MES KIQ aren't initialized.
-    if (!cp.inited) {
+    // (1) Bail if CP/MES KIQ aren't initialized or prior DMA is unresolved.
+    if (!cp.inited || cp.submission_uncertain) {
         CP_LOG("cp_kiq_smoke: CP storage not initialized");
         return kIOReturnNotReady;
     }
@@ -2465,6 +2474,7 @@ cp_kiq_smoke_test(DeviceContext &dev,
 
     if (out_observed_fence) *out_observed_fence = observed;
     if (out_elapsed_us)     *out_elapsed_us     = elapsed_us;
+    cp.submission_uncertain = true;
     CP_LOG("cp_kiq_smoke: fence wait TIMEOUT expected=%#x observed=%#x "
            "after %u us (bar0 readback=%#010x, rptr=%u, wptr=%u)",
            expected_fence_value, observed, elapsed_us,

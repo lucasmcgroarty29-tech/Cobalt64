@@ -555,6 +555,8 @@ constexpr uint64_t kCPDoorbellStride = 4;   // dword-indexed aperture: byte offs
 
 struct CPContext {
     bool              inited           { false };
+    // Sticky fail-stop after a published CP command does not retire.
+    bool              submission_uncertain { false };
 
     // GFX ring (sysmem, bound into GART)
     SysMem            ring_sys         {};            // was ring_buf + ring_dma
@@ -827,7 +829,7 @@ kern_return_t cp_submit_ib(const DeviceContext &dev, CPContext &cp,
 
 // Poll cp.fence_cpu until it reaches `fence`. Returns kIOReturnTimeout and
 // leaves *observed at the last value seen if it does not.
-kern_return_t cp_wait_fence(const CPContext &cp, uint32_t fence,
+kern_return_t cp_wait_fence(CPContext &cp, uint32_t fence,
                             uint64_t timeout_us, uint64_t *observed,
                             uint64_t *elapsed_us);
 
