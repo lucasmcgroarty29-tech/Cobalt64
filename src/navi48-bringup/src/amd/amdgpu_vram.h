@@ -1,4 +1,5 @@
-// VERBATIM from lemonade-sdk/mac-amdgpu (MIT) dext/amdgpu/amdgpu_vram.h @ 3bdeed2 — platform-independent; keep in sync, do not fork.
+// Originally ported from lemonade-sdk/mac-amdgpu (MIT) dext/amdgpu/amdgpu_vram.h @ 3bdeed2.
+// This fork adds local overflow checks, invalid-free guards and thread-safe metadata locking.
 //
 //  amdgpu_vram.h — Allocator for the visible VRAM aperture (BAR0-LOW).
 //
