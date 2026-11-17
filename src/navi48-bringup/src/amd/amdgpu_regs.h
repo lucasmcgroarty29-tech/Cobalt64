@@ -104,7 +104,8 @@ static inline void WBAR0_64(const DeviceContext &ctx, uint64_t byte_offset, uint
 
 static inline void bar0_memcpy_to_vram(const DeviceContext &ctx, uint64_t vram_byte_offset,
                                        const void *src, uint64_t size_bytes) {
-    if (!ctx.bar0 || !amdgpu_range_fits(ctx.bar0Size, vram_byte_offset, size_bytes)) return;
+    if (!ctx.bar0 || !amdgpu_range_fits(ctx.bar0Size, vram_byte_offset, size_bytes) ||
+        (size_bytes != 0 && src == nullptr)) return;
     const uint8_t *bytes = static_cast<const uint8_t *>(src);
     volatile uint8_t *dst = ctx.bar0 + vram_byte_offset;
     uint64_t off = 0;
@@ -120,9 +121,11 @@ static inline void bar0_memcpy_to_vram(const DeviceContext &ctx, uint64_t vram_b
         uint32_t v; memcpy(&v, bytes + off, 4);
         *reinterpret_cast<volatile uint32_t *>(dst + off) = v; off += 4;
     }
-    if (off < size_bytes) {
-        uint32_t v = 0; memcpy(&v, bytes + off, size_bytes - off);
-        *reinterpret_cast<volatile uint32_t *>(dst + off) = v;
+    // Copy a short tail byte-by-byte. A 32-bit store here used to write
+    // beyond the caller's requested span when size_bytes was not dword-aligned.
+    while (off < size_bytes) {
+        dst[off] = bytes[off];
+        off++;
     }
     storeFence();
 }
@@ -142,6 +145,10 @@ static inline void bar0_memset_vram(const DeviceContext &ctx, uint64_t vram_byte
     }
     while (off + 4 <= size_bytes) {
         *reinterpret_cast<volatile uint32_t *>(dst + off) = pattern; off += 4;
+    }
+    while (off < size_bytes) {
+        dst[off] = (uint8_t)(pattern >> ((off & 3ULL) * 8ULL));
+        off++;
     }
     storeFence();
 }
@@ -172,7 +179,8 @@ static inline void WVRAM32_via_mm(const DeviceContext &ctx, uint64_t pos, uint32
 // is rounded down to a dword; callers stage dword-aligned data.
 static inline void vram_memcpy(const DeviceContext &ctx, uint64_t vram_byte_offset,
                                const void *src, size_t len) {
-    if (vram_byte_offset > ctx.vramSizeBytes || len > ctx.vramSizeBytes - vram_byte_offset) return;
+    if ((len != 0 && src == nullptr) || vram_byte_offset > ctx.vramSizeBytes ||
+        len > ctx.vramSizeBytes - vram_byte_offset) return;
     if (ctx.bar0 != nullptr && amdgpu_range_fits(ctx.bar0Size, vram_byte_offset, len)) {
         bar0_memcpy_to_vram(ctx, vram_byte_offset, src, len);
         return;
