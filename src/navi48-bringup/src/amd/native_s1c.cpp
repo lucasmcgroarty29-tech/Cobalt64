@@ -2230,7 +2230,7 @@ struct G1Env {
         uint32_t ib[kWaitDw];
         const uint32_t ndw = emit_wait_never(ib, kTestVa + kPollOff);
         bar0_memcpy_to_vram(dev, gG1.boOff + kHangIbOff, ib, ndw * 4u);
-        amdgpu_hdp_flush(dev);
+        // ring_submit performs the checked drain after staging the ring and before WPTR publication.
         const uint64_t va = kTestVa + kHangIbOff;
         const uint32_t by = ndw * 4u;
         uint64_t seq = 0;
@@ -2324,7 +2324,7 @@ struct G1Env {
         ib[3] = (uint32_t)((kTestVa + kProbeOff) >> 32);
         ib[4] = ps.magic;
         bar0_memcpy_to_vram(dev, gG1.boOff + kProbeIbOff, ib, sizeof(ib));
-        amdgpu_hdp_flush(dev);
+        // ring_submit performs the checked drain after staging the ring and before WPTR publication.
         const uint64_t va = kTestVa + kProbeIbOff;
         const uint32_t by = (uint32_t)sizeof(ib);
         uint64_t seq = 0;
