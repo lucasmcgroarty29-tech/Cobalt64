@@ -108,6 +108,7 @@
 #include <IOKit/IOLib.h>
 
 #include "amdgpu_gmc.h"
+#include "gart_range_bounds.h"
 #include "rebar_pure.h"   // 0.0.663: visible_size / pool_sizes (pure, host-tested)
 #include "amdgpu_log.h"
 #include "amdgpu_field_defs.h"
@@ -1800,42 +1801,45 @@ kern_return_t
 gmc_bind_existing(DeviceContext &dev, GMCContext &gmc, uint64_t busAddr,
                   uint64_t sizeBytes, uint64_t *outMcAddr)
 {
-    if (!gmc.inited)                    return kIOReturnNotReady;
-    if (gmc.gart_pt_bus == 0)           return kIOReturnNotReady;
-    if (outMcAddr == nullptr)           return kIOReturnBadArgument;
-    if (busAddr == 0 || sizeBytes == 0) return kIOReturnBadArgument;
-    if ((busAddr & (kAMDGPUGPUPageSize - 1)) != 0) return kIOReturnNotAligned;
+    if (!gmc.inited)          return kIOReturnNotReady;
+    if (gmc.gart_pt_bus == 0) return kIOReturnNotReady;
+    if (outMcAddr == nullptr || busAddr == 0) return kIOReturnBadArgument;
 
-    uint64_t rounded = (sizeBytes + kAMDGPUGPUPageSize - 1) &
-                       ~((uint64_t)kAMDGPUGPUPageSize - 1);
-    if (gmc.gart_bump_offset + rounded > gmc.gart_size) {
-        GMC_LOG("gmc_bind_existing: out of GART (need %llu, free %llu)",
+    uint64_t rounded = 0;
+    uint32_t numPTEs = 0;
+    if (!gart_checked_page_span(sizeBytes, &rounded, &numPTEs) ||
+        !gart_checked_bus_span(busAddr, rounded))
+        return kIOReturnBadArgument;
+
+    const uint64_t off = gmc.gart_bump_offset;
+    if (!gart_checked_range(gmc.gart_size, off, rounded)) {
+        GMC_LOG("gmc_bind_existing: out of GART (need %llu, offset %llu, size %llu)",
                 (unsigned long long)rounded,
-                (unsigned long long)(gmc.gart_size - gmc.gart_bump_offset));
+                (unsigned long long)off,
+                (unsigned long long)gmc.gart_size);
         return kIOReturnNoSpace;
     }
-    uint64_t off = gmc.gart_bump_offset;
-    gmc.gart_bump_offset += rounded;
 
-    // GMC is programmed with 4 KB GPU-page granularity (PAGE_TABLE_START
-    // = gart_start >> 12). One PTE = 4 KB of GART space. Mirrors upstream
-    // amdgpu_gart_map, which writes one PTE per AMDGPU_GPU_PAGE_SIZE
-    // regardless of host CPU page size.
-    uint32_t numPTEs  = (uint32_t)(rounded / kAMDGPUGPUPageSize);
-    uint64_t firstPTE = off / kAMDGPUGPUPageSize;
+    const uint64_t firstPTE = off / kAMDGPUGPUPageSize;
+    uint64_t mcAddr = 0;
+    if (!gart_checked_pte_range(gmc.gart_pt_size, firstPTE, numPTEs) ||
+        !gart_checked_add_u64(gmc.gart_start, off, &mcAddr))
+        return kIOReturnBadArgument;
+
+    // Reserve the interval before writing PTEs. This remains a bump allocator;
+    // concurrent callers still require the shared-lock audit before use.
+    gmc.gart_bump_offset = off + rounded;
+
     for (uint32_t i = 0; i < numPTEs; i++) {
-        uint64_t pa = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
-        // GFX12 single-level GART PTE: VALID|SYSTEM|SNOOPED|EXEC|R|W,
-        // MTYPE_UC, plus IS_PTE (bit 63) so the GMC walker treats the
-        // entry as a leaf PTE and not a PDE pointer.
-        uint64_t pte = (pa & ~((uint64_t)0xFFFULL)) | PTEFlags::SYSMEM_RW;
-        uint64_t pteVRAMOffset = gmc.gart_pt_vram_offset +
-                                 (firstPTE + i) * 8ULL;
+        const uint64_t pa = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
+        const uint64_t pte = (pa & ~((uint64_t)0xFFFULL)) | PTEFlags::SYSMEM_RW;
+        const uint64_t pteVRAMOffset = gmc.gart_pt_vram_offset +
+                                       (firstPTE + i) * 8ULL;
         bar0_memcpy_to_vram(dev, pteVRAMOffset, &pte, sizeof(pte));
     }
     amdgpu_hdp_flush(dev);
 
-    *outMcAddr = gmc.gart_start + off;
+    *outMcAddr = mcAddr;
     GMC_LOG("bind_existing: %llu bytes @ bus=%#llx -> mc=%#llx "
             "(%u PTEs @ 4KB stride starting at PT idx %llu, PT vram_off=%#llx)",
             (unsigned long long)rounded, (unsigned long long)busAddr,
@@ -1873,48 +1877,53 @@ kern_return_t
 gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
             uint64_t busAddr, uint64_t sizeBytes)
 {
-    if (!gmc.inited)                    return kIOReturnNotReady;
-    if (gmc.gart_pt_bus == 0)           return kIOReturnNotReady;
-    if (busAddr == 0 || sizeBytes == 0) return kIOReturnBadArgument;
-    if ((busAddr    & (kAMDGPUGPUPageSize - 1)) != 0) return kIOReturnNotAligned;
-    if ((gartOffset & (kAMDGPUGPUPageSize - 1)) != 0) return kIOReturnNotAligned;
+    if (!gmc.inited)          return kIOReturnNotReady;
+    if (gmc.gart_pt_bus == 0) return kIOReturnNotReady;
+    if (busAddr == 0)         return kIOReturnBadArgument;
+    if ((gartOffset & (kAMDGPUGPUPageSize - 1)) != 0 ||
+        (busAddr & (kAMDGPUGPUPageSize - 1)) != 0)
+        return kIOReturnNotAligned;
 
-    uint64_t rounded = (sizeBytes + kAMDGPUGPUPageSize - 1) &
-                       ~((uint64_t)kAMDGPUGPUPageSize - 1);
-    if (gartOffset + rounded > gmc.gart_size) {
-        GMC_LOG("bind_at: [%#llx..%#llx) is outside the %llu MiB GART",
+    uint64_t rounded = 0;
+    uint32_t numPTEs = 0;
+    if (!gart_checked_page_span(sizeBytes, &rounded, &numPTEs) ||
+        !gart_checked_bus_span(busAddr, rounded))
+        return kIOReturnBadArgument;
+    if (!gart_checked_range(gmc.gart_size, gartOffset, rounded)) {
+        GMC_LOG("bind_at: range offset=%#llx size=%#llx is outside GART size=%#llx",
                 (unsigned long long)gartOffset,
-                (unsigned long long)(gartOffset + rounded),
-                (unsigned long long)(gmc.gart_size >> 20));
+                (unsigned long long)rounded,
+                (unsigned long long)gmc.gart_size);
         return kIOReturnBadArgument;
     }
-    // One page table, two owners. Refuse only a REAL overlap with the region the
-    // bump allocator has actually handed out: [gart_bump_start, gart_bump_offset).
-    //
-    // The old test was `gartOffset < gart_bump_offset` — "anything below the
-    // high-water mark" — which is correct ONLY while the region starts at 0. With
-    // the region moved to the top of the aperture that test would refuse
-    // every one of Apple's low-page binds and mirror nothing at all, which is
-    // worse than the collision it was meant to prevent.
+    if (gmc.gart_bump_start > gmc.gart_bump_offset ||
+        gmc.gart_bump_offset > gmc.gart_size)
+        return kIOReturnNotReady;
+
+    const uint64_t endOffset = gartOffset + rounded;
     if (gartOffset < gmc.gart_bump_offset &&
-        gartOffset + rounded > gmc.gart_bump_start) {
+        endOffset > gmc.gart_bump_start) {
         GMC_LOG("bind_at: [%#llx..%#llx) overlaps this driver's own bump region "
                 "[%#llx..%#llx) — REFUSING",
                 (unsigned long long)gartOffset,
-                (unsigned long long)(gartOffset + rounded),
+                (unsigned long long)endOffset,
                 (unsigned long long)gmc.gart_bump_start,
                 (unsigned long long)gmc.gart_bump_offset);
-        gBindAtOverlapRefusals++;   // 0.0.368: RULE E1 requires this to be 0 at arm time
+        gBindAtOverlapRefusals++;
         return kIOReturnBusy;
     }
 
-    uint32_t numPTEs  = (uint32_t)(rounded / kAMDGPUGPUPageSize);
-    uint64_t firstPTE = gartOffset / kAMDGPUGPUPageSize;
+    const uint64_t firstPTE = gartOffset / kAMDGPUGPUPageSize;
+    uint64_t mcAddr = 0;
+    if (!gart_checked_pte_range(gmc.gart_pt_size, firstPTE, numPTEs) ||
+        !gart_checked_add_u64(gmc.gart_start, gartOffset, &mcAddr))
+        return kIOReturnBadArgument;
+
     for (uint32_t i = 0; i < numPTEs; i++) {
-        uint64_t pa  = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
-        uint64_t pte = (pa & ~((uint64_t)0xFFFULL)) | PTEFlags::SYSMEM_RW;
-        uint64_t pteVRAMOffset = gmc.gart_pt_vram_offset +
-                                 (firstPTE + i) * 8ULL;
+        const uint64_t pa = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
+        const uint64_t pte = (pa & ~((uint64_t)0xFFFULL)) | PTEFlags::SYSMEM_RW;
+        const uint64_t pteVRAMOffset = gmc.gart_pt_vram_offset +
+                                       (firstPTE + i) * 8ULL;
         bar0_memcpy_to_vram(dev, pteVRAMOffset, &pte, sizeof(pte));
     }
     amdgpu_hdp_flush(dev);
@@ -1925,7 +1934,7 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
                 "from PT idx %llu)",
                 (unsigned)gBindAtCalls,
                 (unsigned long long)rounded, (unsigned long long)busAddr,
-                (unsigned long long)(gmc.gart_start + gartOffset),
+                (unsigned long long)mcAddr,
                 (unsigned long long)gartOffset, (unsigned)numPTEs,
                 (unsigned long long)firstPTE);
     return kIOReturnSuccess;
