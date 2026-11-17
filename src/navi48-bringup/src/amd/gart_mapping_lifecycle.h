@@ -31,7 +31,11 @@ typedef struct GARTMappingLifecycle {
     uint32_t invalidated_context_mask;
 } GARTMappingLifecycle;
 
-/* required_context_mask uses one bit per hub/VMID pair that can cache this VA. */
+/*
+ * required_context_mask must be non-zero and uses bit (hub_index * 16 + VMID).
+ * Hub index 0 is MMHUB; hub index 1 is GFXHUB. The caller sets every
+ * hub/VMID pair that may have cached the mapping.
+ */
 void gart_lifecycle_init(GARTMappingLifecycle *lifecycle,
                          uint32_t required_context_mask);
 bool gart_lifecycle_pte_written(GARTMappingLifecycle *lifecycle);
