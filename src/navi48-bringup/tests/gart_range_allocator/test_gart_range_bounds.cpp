@@ -56,6 +56,12 @@ static void test_bus_and_add_overflow(void)
     assert(value == 0x3000);
     assert(!gart_checked_add_u64(UINT64_MAX - 3, 4, &value));
     assert(!gart_checked_add_u64(0, 1, nullptr));
+    uint32_t vmid_bit = 0;
+    assert(gart_checked_vmid_bit(0, &vmid_bit) && vmid_bit == 1U);
+    assert(gart_checked_vmid_bit(15, &vmid_bit) && vmid_bit == 0x8000U);
+    assert(!gart_checked_vmid_bit(16, &vmid_bit));
+    assert(!gart_checked_vmid_bit(UINT32_MAX, &vmid_bit));
+    assert(!gart_checked_vmid_bit(0, nullptr));
 }
 
 int main(void)
