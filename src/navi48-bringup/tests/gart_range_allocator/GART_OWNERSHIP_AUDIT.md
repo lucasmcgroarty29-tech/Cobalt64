@@ -85,3 +85,55 @@ PTE-clear, HDP-flush and TLB-invalidation sequence, including timeout paths.
 Then add tests for those caller contracts. Only after that should the driver
 integrate a free-list, and only in the `GARTContext` path if the ownership
 audit confirms it is still used.
+
+## Production call-site audit (2026-11-17)
+
+The following call sites were confirmed by reading the current branch sources.
+This is a source-level audit, not a runtime validation.
+
+| Path | Confirmed use | Ownership / lifecycle consequence |
+|---|---|---|
+| `amdgpu_init.cpp` PDB0 self-test | Calls `gmc_bind_existing` for one test `SysMem` page | The page is deliberately retained after the test because the bump allocator has no release path and a live PTE must not point at reclaimed memory. |
+| `sdma_v7_0.cpp` | Allocates each SDMA writeback page in `SysMem`, maps it with `gmc_bind_existing`, and stores the resulting GART MC address | The SDMA instance owns the host allocation; the GMC bump slot is not individually reclaimed. |
+| `Navi48Bringup.cpp` clear-state buffer | Allocates and maps one page with `gmc_bind_existing`, then retains it for the kext lifetime | Explicitly persistent mapping. |
+| `Navi48Bringup.cpp` fast-copy staging and read-back buffers | Maps staging allocations with `gmc_bind_existing` | Persistent bump allocations; failures can leave allocated host memory retained for the boot. |
+| `Navi48Bringup.cpp` Apple GART mirror wrapper | Converts Apple's absolute GART MC address to an aperture offset and calls `gmc_bind_at` | Exact-offset shared mapping. Must not be moved by a first-fit allocator. |
+| `amdgpu_gart.cpp` | Defines `gart_bind_sysmem`, `gart_bind_existing`, and `gart_unbind` | These helpers use the separate `GARTContext::nextFreeOffset` allocator. No production caller was established in the call-site files inspected so far; treat this path as unproven/possibly dormant, not as the confirmed integration target. |
+
+### Important teardown finding
+
+The normal bring-up teardown in `amdgpu_init.cpp` first removes scheduler queues,
+stops SDMA queue fetch, halts SDMA engines, disables CP/MEC, and parks MES. It then
+calls `sdma_release_storage` and later `gmc_release_resources`.
+
+That ordering provides an engine-stop step before the SDMA writeback `SysMem`
+allocation is freed. However, the inspected teardown does not show the full
+mapping-retirement sequence required for safe slot reuse: it does not clear the
+individual GART PTEs and invalidate the relevant hub TLBs before freeing the
+writeback allocation. `gmc_release_resources` itself frees scratch allocations
+and drops allocator metadata; it does not itself disable the GART hubs or perform
+a TLB flush. This does not prove a live GPU access occurs during teardown, because
+the engines are stopped first, but it means teardown must not be treated as a
+general-purpose unbind/reuse implementation.
+
+The SDMA storage release path also frees the `SysMem` writeback page while its
+GART PTE remains in the page table. That can be acceptable only as part of a
+strictly quiesced whole-device teardown where the mapping is never reused and
+the hardware page-table context is safely retired before any engine can resume.
+The current code's hub-disable / context-retirement guarantees need a separate
+audit before claiming that condition is met.
+
+### Consequence for allocator integration
+
+The confirmed active allocator is `GMCContext::gart_bump_offset`, not
+`GARTContext::nextFreeOffset`. But the GMC aperture is shared: Apple's mappings
+occupy caller-selected offsets in the lower region, while the driver-owned bump
+allocator can be placed in a reserved high region. A general allocator cannot
+replace the bump pointer until it models both ownership ranges and a reservation
+mechanism for Apple's exact-offset mappings.
+
+The immediate safe next step is therefore not to wire in the free-list. It is to
+audit the full teardown and each persistent mapping owner, then define a GMC
+mapping record that links the aperture interval, host-memory owner, GPU users,
+hub/VMID visibility, and retirement status. Any timeout or uncertain engine state
+must quarantine the interval rather than return it to the allocator.
