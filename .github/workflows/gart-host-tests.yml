@@ -11,6 +11,8 @@ on:
       - "src/navi48-bringup/src/amd/amdgpu_range_bounds.h"
       - "src/navi48-bringup/src/amd/rebar_pure.h"
       - "src/navi48-bringup/src/amd/amdgpu_regs.h"
+      - "src/navi48-bringup/src/amd/hdp_flush_policy.h"
+      - "src/navi48-bringup/tests/gart_range_allocator/test_hdp_flush_policy.cpp"
       - "src/navi48-bringup/src/amd/amdgpu_vram.h"
       - "src/navi48-bringup/src/amd/sdma_v7_0.cpp"
       - "src/navi48-bringup/src/amd/fw_loader.cpp"
@@ -21,6 +23,7 @@ on:
       - "src/navi48-bringup/src/amd/gmc_v12_0.cpp"
       - "src/navi48-bringup/src/amd/amdgpu_gart.cpp"
       - "src/navi48-bringup/tests/gart_range_allocator/**"
+      - "src/navi48-bringup/tests/gart_range_allocator/test_hdp_flush_policy.cpp"
       - ".github/workflows/gart-host-tests.yml"
   pull_request:
     paths:
@@ -33,6 +36,7 @@ on:
       - "src/navi48-bringup/src/amd/gmc_v12_0.cpp"
       - "src/navi48-bringup/tests/native_rebar_test.cpp"
       - "src/navi48-bringup/tests/gart_range_allocator/**"
+      - "src/navi48-bringup/tests/gart_range_allocator/test_hdp_flush_policy.cpp"
       - ".github/workflows/gart-host-tests.yml"
 
 permissions:
