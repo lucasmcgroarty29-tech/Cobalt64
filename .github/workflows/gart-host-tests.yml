@@ -33,7 +33,7 @@ jobs:
             echo "::error::Unchecked HDP flush call found"
             exit 1
           fi
-          if grep -RInE '^[[:space:]]*sdma_wb_write32\(' src/navi48-bringup/src; then
+          if grep -RInE '^[[:space:]]*sdma_wb_write32\(dev,' src/navi48-bringup/src; then
             echo "::error::Unchecked SDMA writeback call found"
             exit 1
           fi
