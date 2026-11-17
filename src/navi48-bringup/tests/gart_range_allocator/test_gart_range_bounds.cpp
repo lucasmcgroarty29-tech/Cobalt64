@@ -3,6 +3,9 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <algorithm>
+#include <thread>
+#include <vector>
 
 static void test_page_spans(void)
 {
@@ -63,6 +66,42 @@ static void test_ranges_and_pte_bounds(void)
     assert(!gart_checked_pte_vram_range(0x1000, 4096, 0, 1, nullptr));
 }
 
+static void test_atomic_bump_reservations(void)
+{
+    constexpr uint32_t kThreads = 8;
+    constexpr uint32_t kPerThread = 64;
+    constexpr uint64_t kSpan = 4096;
+    constexpr uint64_t kTotal = (uint64_t)kThreads * kPerThread * kSpan;
+    uint64_t next = 0;
+    std::vector<uint64_t> offsets[kThreads];
+    std::thread workers[kThreads];
+    for (uint32_t t = 0; t < kThreads; ++t) {
+        workers[t] = std::thread([&, t]() {
+            offsets[t].reserve(kPerThread);
+            for (uint32_t i = 0; i < kPerThread; ++i) {
+                uint64_t offset = 0;
+                assert(gart_atomic_bump_reserve(&next, kTotal, kSpan, &offset));
+                offsets[t].push_back(offset);
+            }
+        });
+    }
+    for (auto &worker : workers) worker.join();
+
+    std::vector<uint64_t> all;
+    all.reserve((size_t)kThreads * kPerThread);
+    for (const auto &list : offsets) all.insert(all.end(), list.begin(), list.end());
+    std::sort(all.begin(), all.end());
+    for (size_t i = 0; i < all.size(); ++i)
+        assert(all[i] == (uint64_t)i * kSpan);
+    assert(next == kTotal);
+
+    uint64_t unused = 0;
+    assert(!gart_atomic_bump_reserve(&next, kTotal, kSpan, &unused));
+    assert(!gart_atomic_bump_reserve(&next, kTotal, 0, &unused));
+    assert(!gart_atomic_bump_reserve(nullptr, kTotal, kSpan, &unused));
+    assert(!gart_atomic_bump_reserve(&next, kTotal, kSpan, nullptr));
+}
+
 static void test_bus_and_add_overflow(void)
 {
     uint64_t value = 0;
@@ -88,6 +127,6 @@ int main(void)
     test_page_spans();
     test_ranges_and_pte_bounds();
     test_bus_and_add_overflow();
-    puts("GART checked bounds: 3 test groups passed");
+    puts("GART checked bounds: 4 test groups passed");
     return 0;
 }
