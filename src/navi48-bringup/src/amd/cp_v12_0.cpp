@@ -1457,7 +1457,7 @@ cp_dump_gfx_hqd(const DeviceContext &dev, const char *where)
 kern_return_t
 cp_gfx_mqd_init(const DeviceContext &dev, CPContext &cp)
 {
-    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped ||
+    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped || cp.legacy_ring_armed ||
         cp.mqd_cpu == nullptr || cp.mqd_bus == 0)
         return kIOReturnNotReady;
     if (cp.mqd_sys.size < GfxMqd::kDwords * 4u) {
@@ -1593,7 +1593,7 @@ kern_return_t
 cp_gfx_mqd_init_external(const DeviceContext &dev, CPContext &cp,
                          CPExternalGfxQueue &q)
 {
-    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped ||
+    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped || cp.legacy_ring_armed ||
         cp.mqd_cpu == nullptr || cp.mqd_bus == 0)
         return kIOReturnNotReady;
     if (cp.mqd_sys.size < GfxMqd::kDwords * 4u) {
@@ -1744,7 +1744,7 @@ cp_gfx_mqd_init_external(const DeviceContext &dev, CPContext &cp,
 kern_return_t
 cp_map_gfx_kgq_mes(const DeviceContext &dev, CPContext &cp, MESContext &mes)
 {
-    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped) return kIOReturnNotReady;
+    if (!cp.inited || cp.submission_uncertain || cp.kgq_mapped || cp.legacy_ring_armed) return kIOReturnNotReady;
     if (!cp.gfx_mqd_inited) {
         CP_LOG("map_gfx_kgq_mes: MQD not initialised — call cp_gfx_mqd_init first");
         return kIOReturnNotReady;
