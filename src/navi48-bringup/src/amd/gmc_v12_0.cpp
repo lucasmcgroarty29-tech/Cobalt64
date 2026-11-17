@@ -1422,7 +1422,10 @@ gmc_pdb0_build(DeviceContext &dev, GMCContext &gmc)
             (unsigned long long)gmc.gart_start,
             (unsigned)(gmc.gart_size / kAMDGPUGPUPageSize));
 
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        GMC_LOG("pdb0: HDP flush window unavailable; refusing to publish the table");
+        return kIOReturnNotReady;
+    }
 
     // Read the entries back through the same aperture so the log carries what
     // the walker will actually fetch, not what we intended to write.
@@ -1493,7 +1496,10 @@ gmc_pdb0_revert(DeviceContext &dev, GMCContext &gmc)
     hub_init_gart_aperture_regs(dev, gmc, gmc.gfxhub, /*usePDB0*/ false);
     hub_enable_system_domain(dev, gmc.gfxhub, /*depth*/ 0, /*blockSize*/ 0,
                              /*writeBlockSize*/ true);
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        GMC_LOG("pdb0: HDP flush unavailable during revert; refusing TLB transition");
+        return kIOReturnNotReady;
+    }
     kern_return_t r = gmc_flush_gpu_tlb(dev, gmc, gmc.gfxhub, /*vmid*/ 0,
                                         /*type*/ 0);
     GMC_LOG("pdb0: revert done (TLB flush %#x)", r);
@@ -1650,7 +1656,11 @@ gmc_init(DeviceContext &dev, GMCContext &gmc)
     // table writes we just made via the BAR.
     // Mirrors gmc_v12_0_gart_enable (gmc_v12_0.c:1019).
     if (dev.ip.isResolved(IPBlock::HDP)) {
-        gmc_hdp_flush(dev);
+        r = gmc_hdp_flush(dev);
+        if (r != kIOReturnSuccess) {
+            GMC_LOG("GMCInit: HDP flush window unavailable; refusing GART readiness");
+            return r;
+        }
     }
 
     // set_fault_enable_default — wire the L2 protection-fault unit to
@@ -1701,8 +1711,7 @@ gmc_init(DeviceContext &dev, GMCContext &gmc)
 kern_return_t
 gmc_hdp_flush(DeviceContext &dev)
 {
-    amdgpu_hdp_flush(dev);
-    return kIOReturnSuccess;
+    return amdgpu_hdp_flush(dev) ? kIOReturnSuccess : kIOReturnNotReady;
 }
 
 // ============================================================
@@ -1909,7 +1918,11 @@ gmc_bind_existing(DeviceContext &dev, GMCContext &gmc, uint64_t busAddr,
         const uint64_t pteVRAMOffset = pteBaseOffset + (uint64_t)i * 8ULL;
         bar0_memcpy_to_vram(dev, pteVRAMOffset, &pte, sizeof(pte));
     }
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        GMC_LOG("gmc_bind_existing: HDP flush unavailable; reserved interval %#llx+%#llx remains quarantined",
+                (unsigned long long)off, (unsigned long long)rounded);
+        return kIOReturnNotReady;
+    }
 
     *outMcAddr = mcAddr;
     GMC_LOG("bind_existing: %llu bytes @ bus=%#llx -> mc=%#llx "
@@ -2016,7 +2029,11 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
         const uint64_t pteVRAMOffset = pteBaseOffset + (uint64_t)i * 8ULL;
         bar0_memcpy_to_vram(dev, pteVRAMOffset, &pte, sizeof(pte));
     }
-    amdgpu_hdp_flush(dev);
+    if (!amdgpu_hdp_flush(dev)) {
+        GMC_LOG("bind_at: HDP flush unavailable; refusing to report mapping success for offset %#llx",
+                (unsigned long long)gartOffset);
+        return kIOReturnNotReady;
+    }
 
     gBindAtCalls++;
     if (gBindAtCalls <= 8 || (gBindAtCalls % 512) == 0)
