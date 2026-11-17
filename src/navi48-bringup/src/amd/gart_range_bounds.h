@@ -62,3 +62,23 @@ static inline bool gart_checked_add_u64(uint64_t base,
     *result = base + offset;
     return true;
 }
+
+static inline bool gart_checked_pte_vram_range(uint64_t table_base,
+                                               uint64_t table_bytes,
+                                               uint64_t first_pte,
+                                               uint32_t page_count,
+                                               uint64_t *first_byte_offset)
+{
+    if (first_byte_offset == nullptr ||
+        !gart_checked_pte_range(table_bytes, first_pte, page_count))
+        return false;
+    const uint64_t relative_offset = first_pte * 8ULL;
+    const uint64_t span_bytes = (uint64_t)page_count * 8ULL;
+    uint64_t first = 0;
+    uint64_t end = 0;
+    if (!gart_checked_add_u64(table_base, relative_offset, &first) ||
+        !gart_checked_add_u64(first, span_bytes, &end))
+        return false;
+    *first_byte_offset = first;
+    return true;
+}
