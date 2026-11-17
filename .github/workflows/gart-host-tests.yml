@@ -6,39 +6,12 @@ on:
       - lucas-development
     paths:
       - "src/navi48-bringup/src/amd/**"
-      - "src/navi48-bringup/src/amd/gart_range_allocator.*"
-      - "src/navi48-bringup/src/amd/gart_mapping_lifecycle.*"
-      - "src/navi48-bringup/src/amd/gart_range_bounds.h"
-      - "src/navi48-bringup/src/amd/amdgpu_range_bounds.h"
-      - "src/navi48-bringup/src/amd/rebar_pure.h"
-      - "src/navi48-bringup/src/amd/amdgpu_regs.h"
-      - "src/navi48-bringup/src/amd/hdp_flush_policy.h"
-      - "src/navi48-bringup/tests/gart_range_allocator/test_hdp_flush_policy.cpp"
-      - "src/navi48-bringup/src/amd/amdgpu_vram.h"
-      - "src/navi48-bringup/src/amd/sdma_v7_0.cpp"
-      - "src/navi48-bringup/src/amd/fw_loader.cpp"
-      - "src/navi48-bringup/src/amd/mes_v12_1.cpp"
-      - "src/navi48-bringup/src/amd/psp_v14_0.cpp"
-      - "src/navi48-bringup/src/Navi48Bringup.cpp"
-      - "src/navi48-bringup/src/amd/native_s1b.cpp"
-      - "src/navi48-bringup/src/amd/gmc_v12_0.cpp"
-      - "src/navi48-bringup/src/amd/amdgpu_gart.cpp"
       - "src/navi48-bringup/tests/gart_range_allocator/**"
-      - "src/navi48-bringup/tests/gart_range_allocator/test_hdp_flush_policy.cpp"
       - ".github/workflows/gart-host-tests.yml"
   pull_request:
     paths:
       - "src/navi48-bringup/src/amd/**"
-      - "src/navi48-bringup/src/amd/gart_range_allocator.*"
-      - "src/navi48-bringup/src/amd/gart_mapping_lifecycle.*"
-      - "src/navi48-bringup/src/amd/rebar_pure.h"
-      - "src/navi48-bringup/src/amd/amdgpu_range_bounds.h"
-      - "src/navi48-bringup/src/amd/gart_range_bounds.h"
-      - "src/navi48-bringup/src/amd/amdgpu_vram.h"
-      - "src/navi48-bringup/src/amd/gmc_v12_0.cpp"
-      - "src/navi48-bringup/tests/native_rebar_test.cpp"
       - "src/navi48-bringup/tests/gart_range_allocator/**"
-      - "src/navi48-bringup/tests/gart_range_allocator/test_hdp_flush_policy.cpp"
       - ".github/workflows/gart-host-tests.yml"
 
 permissions:
@@ -56,10 +29,7 @@ jobs:
           sudo apt-get install --yes g++ make
       - name: Reject unchecked HDP and SDMA writeback calls
         run: |
-          if grep -RInE '^[[:space:]]*(amdgpu_hdp_flush|gmc_hdp_flush)\([^;]*\);[[:space:]]*        run: make -C src/navi48-bringup/tests/gart_range_allocator clean test
-      - name: Run ThreadSanitizer concurrency tests
-        run: make -C src/navi48-bringup/tests/gart_range_allocator test-tsan
- src/navi48-bringup/src; then
+          if grep -RInE '^[[:space:]]*(amdgpu_hdp_flush|gmc_hdp_flush)\([^;]*\);[[:space:]]*$' src/navi48-bringup/src; then
             echo "::error::Unchecked HDP flush call found"
             exit 1
           fi
