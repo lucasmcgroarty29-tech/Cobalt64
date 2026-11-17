@@ -602,6 +602,9 @@ sdma_kick_external_doorbell(const DeviceContext &dev, const SDMAInstance &inst,
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
     const uint64_t v = static_cast<uint64_t>(wptrDwords) << 2;   // byte wptr
 
+    // Preflight the checked HDP path before touching a polled WPTR shadow.
+    if (!amdgpu_hdp_flush(dev)) return kIOReturnNotReady;
+
     // 1) WPTR shadow in the EXTERNAL slot -- not kSDMAWBWptrOffset, which is
     //    QUEUE0's and belongs to the ring we are actively running.
     sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v));
@@ -901,6 +904,9 @@ sdma_q1_kick_doorbell_only(const DeviceContext &dev, const SDMAInstance &inst,
     if (!inst.inited)                    return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
     const uint64_t v = static_cast<uint64_t>(wptrDwords) << 2;   // byte wptr
+
+    // Preflight before updating a writeback pointer that the engine may poll.
+    if (!amdgpu_hdp_flush(dev)) return kIOReturnNotReady;
 
     sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset, static_cast<uint32_t>(v));
     sdma_wb_write32(dev, inst, kSDMAWBExtWptrOffset + 4,
@@ -1419,6 +1425,9 @@ sdma_kick_doorbell(const DeviceContext &dev, const SDMAInstance &inst)
     if (!inst.inited) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC)) return kIOReturnNotReady;
     const uint64_t v = static_cast<uint64_t>(inst.wptr) << 2;
+
+    // Preflight before updating a writeback pointer that the engine may poll.
+    if (!amdgpu_hdp_flush(dev)) return kIOReturnNotReady;
 
     // 1) WPTR shadow in the writeback page — upstream
     //    sdma_v7_0_ring_set_wptr line 220 writes (ring->wptr << 2) to
