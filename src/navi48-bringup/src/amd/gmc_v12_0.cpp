@@ -1607,12 +1607,20 @@ gmc_init(DeviceContext &dev, GMCContext &gmc)
     // dispatch to mmhub.gart_enable only). The gfxhub flush happens
     // later when gmc_gfxhub_gart_enable runs in GFXInit.
     if (dev.ip.isResolved(gmc.mmhub.ip)) {
-        gmc_flush_gpu_tlb(dev, gmc, gmc.mmhub, /*vmid*/ 0, /*type*/ 0);
+        r = gmc_flush_gpu_tlb(dev, gmc, gmc.mmhub, /*vmid*/ 0, /*type*/ 0);
+        if (r != kIOReturnSuccess) {
+            GMC_LOG("MMHUB VMID-0 TLB invalidation failed: %#x — GMCInit refused", r);
+            return r;
+        }
     }
     // Linux amdgpu_gart_map flushes every hub; once the GC hub is live (CP/MES/SDMA
     // fetch their GART rings through it) its TLB must see new PTEs as well.
     if (gmc.gfxhub.gart_enabled && dev.ip.isResolved(gmc.gfxhub.ip)) {
-        gmc_flush_gpu_tlb(dev, gmc, gmc.gfxhub, /*vmid*/ 0, /*type*/ 0);
+        r = gmc_flush_gpu_tlb(dev, gmc, gmc.gfxhub, /*vmid*/ 0, /*type*/ 0);
+        if (r != kIOReturnSuccess) {
+            GMC_LOG("GFXHUB VMID-0 TLB invalidation failed: %#x — GMCInit refused", r);
+            return r;
+        }
     }
 
     dev.gmcReady = true;
