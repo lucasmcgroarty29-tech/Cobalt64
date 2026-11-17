@@ -2313,7 +2313,10 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                        uint32_t tag, uint32_t *badOut) -> bool {
         bar0_memset_vram(dev, srcOff, pattern, kVMFragCopyBytes);
         bar0_memset_vram(dev, dstOff, 0xDEADBEEFu, kVMFragCopyBytes);
-        amdgpu_hdp_flush(dev);
+        if (!amdgpu_hdp_flush(dev)) {
+            GMC_LOG("vmfrag %s: HDP flush unavailable — refusing to submit", name);
+            return false;
+        }
         const kern_return_t flush = gmc_flush_gpu_tlb(dev, gmc, h, /*vmid*/ 1, /*type*/ 0);
         if (flush != kIOReturnSuccess) {
             GMC_LOG("vmfrag %s: VMID-1 TLB invalidation failed %#x — refusing to submit", name, flush);
@@ -2409,9 +2412,10 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     WREG32(dev, st_hi_reg,   saved[4]);
     WREG32(dev, en_lo_reg,   saved[5]);
     WREG32(dev, en_hi_reg,   saved[6]);
-    amdgpu_hdp_flush(dev);
-    const kern_return_t restoreFlush =
-        gmc_flush_gpu_tlb(dev, gmc, h, /*vmid*/ 1, /*type*/ 0);
+    const bool restoreHdp = amdgpu_hdp_flush(dev);
+    const kern_return_t restoreFlush = restoreHdp
+        ? gmc_flush_gpu_tlb(dev, gmc, h, /*vmid*/ 1, /*type*/ 0)
+        : kIOReturnNotReady;
     gmc_clear_vm_faults(dev);
     if (restoreFlush != kIOReturnSuccess) {
         // The old VMID-1 translation may still reference the temporary table
