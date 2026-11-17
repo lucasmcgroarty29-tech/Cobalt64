@@ -166,6 +166,11 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
         !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
         return kIOReturnBadArgument;
 
+    const uint64_t pteBytes = (uint64_t)numPTEs * sizeof(uint64_t);
+    if (!dev.bar0 ||
+        !amdgpu_range_fits(dev.bar0Size, pteBaseOffset, pteBytes))
+        return kIOReturnNotReady;
+
     SysMem m {};
     kern_return_t ret = sysmem_alloc(m, roundedSize, alignment);
     if (ret != kIOReturnSuccess || !m.valid()) {
@@ -251,6 +256,11 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
                                      numPTEs, &pteBaseOffset) ||
         !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
         return kIOReturnBadArgument;
+
+    const uint64_t pteBytes = (uint64_t)numPTEs * sizeof(uint64_t);
+    if (!dev.bar0 ||
+        !amdgpu_range_fits(dev.bar0Size, pteBaseOffset, pteBytes))
+        return kIOReturnNotReady;
 
     if (!reuse) gart.nextFreeOffset = gartOff + rounded;
     for (uint32_t i = 0; i < numPTEs; i++) {
