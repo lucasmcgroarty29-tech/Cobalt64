@@ -27,13 +27,13 @@ typedef enum GARTMappingState {
 typedef struct GARTMappingLifecycle {
     GARTMappingState state;
     uint32_t in_flight;
-    uint32_t required_hub_mask;
+    uint32_t required_context_mask;
     uint32_t invalidated_hub_mask;
 } GARTMappingLifecycle;
 
-/* required_hub_mask uses one bit per translation hub that can cache this VA. */
+/* required_context_mask uses one bit per translation hub that can cache this VA. */
 void gart_lifecycle_init(GARTMappingLifecycle *lifecycle,
-                         uint32_t required_hub_mask);
+                         uint32_t required_context_mask);
 bool gart_lifecycle_pte_written(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_mapping_visible(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_begin_use(GARTMappingLifecycle *lifecycle);
