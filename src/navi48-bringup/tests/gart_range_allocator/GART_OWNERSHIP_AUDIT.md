@@ -424,3 +424,9 @@ partial/forged frees, allocation-ledger exhaustion and recovery, and existing
 concurrent allocation tests. These do not compile the IOKit translation unit;
 the checked GMC call-site edits remain source-audited only until a native
 macOS build is available.
+
+
+The allocator also refuses `init()` while live allocations remain, preventing a
+reset from orphaning issued BOs and making their VRAM available for reuse.
+Reset remains possible once all tracked allocations have been returned. This
+is covered by a host regression test.
