@@ -1625,6 +1625,7 @@ sdma_ring_test(const DeviceContext &dev, SDMAInstance &inst,
     uint32_t last = 0;
     r = sdma_poll_fence(dev, inst, kSDMAWBFenceOffset, fence_value,
                         timeout_us, &elapsed, &last);
+    if (r != kIOReturnSuccess) inst.submission_uncertain = true;
     if (r == kIOReturnSuccess) {
         SDMA_LOG("instance %u: ring_test ok in ~%llu us",
                  inst.instance, (unsigned long long)elapsed);
@@ -1710,6 +1711,7 @@ sdma_const_fill_test(const DeviceContext &dev, SDMAInstance &inst,
     uint32_t last = 0;
     r = sdma_poll_fence(dev, inst, kSDMAWBFenceOffset, fence_value,
                         timeout_us, &elapsed, &last);
+    if (r != kIOReturnSuccess) inst.submission_uncertain = true;
     if (r == kIOReturnSuccess) {
         SDMA_LOG("const_fill_test ok: %u bytes -> %#llx in ~%llu us",
                  byte_count, (unsigned long long)dst,
@@ -1774,6 +1776,7 @@ sdma_copy_linear_test(const DeviceContext &dev, SDMAInstance &inst,
     uint32_t last = 0;
     r = sdma_poll_fence(dev, inst, kSDMAWBFenceOffset, fence_value,
                         timeout_us, &elapsed, &last);
+    if (r != kIOReturnSuccess) inst.submission_uncertain = true;
     if (r == kIOReturnSuccess) {
         SDMA_LOG("copy_linear_test ok: %u bytes %#llx -> %#llx in ~%llu us",
                  byte_count,
@@ -1880,6 +1883,7 @@ sdma_ib_copy_linear_test(const DeviceContext &dev, SDMAInstance &inst,
     uint32_t last = 0;
     r = sdma_poll_fence(dev, inst, kSDMAWBFenceOffset, fence_value,
                         timeout_us, &elapsed, &last);
+    if (r != kIOReturnSuccess) inst.submission_uncertain = true;
     if (r == kIOReturnSuccess) {
         SDMA_LOG("ib-copy(vmid %u) fenced in ~%llu us", vmid,
                  (unsigned long long)elapsed);
