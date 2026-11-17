@@ -661,3 +661,8 @@ The VMID-specific IB copy helper checks the drain before publishing an INDIRECT_
 ## SDMA submission-state quarantine (2026-11-17)
 
 `SDMAInstance` now carries a fail-stop `submission_uncertain` state. A failed ring-data HDP drain, partial/failed writeback WPTR staging, or failed post-WPTR HDP drain marks the instance uncertain. Queue-0 and Queue-1 kick paths refuse further publication, and `sdma_ring_write` refuses further packet staging. The flag is intentionally not cleared by ordinary queue resume/reallocation; only a fresh device initialisation can establish a clean state. This prevents a later successful flush or unrelated submission from accidentally publishing stale ring contents or a partially updated polled WPTR.
+
+
+## Queue-1 self-test ring lifetime (2026-11-17)
+
+The Queue-1 routing self-test now treats a published WPTR without a confirmed fence as an in-flight ownership condition. It does not issue a second MMIO kick, disable the queue, or free the scratch ring when completion is uncertain. It also verifies that RB_ENABLE and IB_ENABLE read back clear before releasing the ring after a completed test. External queue programming is refused if the instance is already in the fail-stop `submission_uncertain` state.

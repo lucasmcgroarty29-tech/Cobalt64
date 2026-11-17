@@ -732,7 +732,7 @@ sdma_program_external_queue_ex(const DeviceContext &dev, SDMAInstance &inst,
                  kSDMAQueuesPerInstance - 1);
         return kIOReturnBadArgument;
     }
-    if (!inst.inited)                       return kIOReturnNotReady;
+    if (!inst.inited || inst.submission_uncertain) return kIOReturnNotReady;
     if (!dev.ip.isResolved(IPBlock::GC))    return kIOReturnNotReady;
     if (ring_gpu_va == 0 || (ring_gpu_va & 0xFF) != 0) return kIOReturnBadArgument;
     if (ring_size_dwords == 0)              return kIOReturnBadArgument;
@@ -989,8 +989,8 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                  queue, kSDMAQueuesPerInstance - 1);
         return kIOReturnBadArgument;
     }
-    if (!inst.inited || !inst.enabled) {
-        SDMA_LOG("q1-selftest: SDMA%u QUEUE0 is not running — skipping (the MCU "
+    if (!inst.inited || inst.submission_uncertain || !inst.enabled) {
+        SDMA_LOG("q1-selftest: SDMA%u is not in a known-good submission state or QUEUE0 is not running — skipping",
                  "unhalt and the instance-wide registers come from its resume)",
                  inst.instance);
         return kIOReturnNotReady;
