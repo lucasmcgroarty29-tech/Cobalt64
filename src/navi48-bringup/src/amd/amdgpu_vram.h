@@ -99,9 +99,11 @@ public:
     // amdgpu::kASPageSize = 16 KB to keep DART happy on any future
     // re-export of these allocations).
     bool alloc(uint64_t bytes, uint64_t alignment, VRAMAllocation *out) {
-        if (!m_inited || bytes == 0 || out == nullptr) return false;
+        if (!m_inited || bytes == 0 || out == nullptr || alignment == 0)
+            return false;
+        if ((alignment & (alignment - 1ULL)) != 0) return false;
         if (alignment < 16384) alignment = 16384;
-        if ((alignment & (alignment - 1ULL)) != 0 ||
+        if (
             bytes > UINT64_MAX - (alignment - 1ULL))
             return false;
         const uint64_t rounded = (bytes + alignment - 1ULL) & ~(alignment - 1ULL);
