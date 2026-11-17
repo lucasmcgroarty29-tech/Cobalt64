@@ -31,6 +31,10 @@ static void test_init_and_allocation_guards(void)
     assert(out.size == 16384ULL);
     assert(out.alignment == 16384ULL);
     assert(a.bytes_used() == 16384ULL);
+    a.init(0x900000ULL, 0x20000ULL); // live allocations must prevent pool reset
+    assert(a.base() == 0x100000ULL);
+    assert(a.size() == 0x10000ULL);
+    assert(a.bytes_used() == 16384ULL);
     a.free(out);
     assert(a.bytes_used() == 0);
     assert(a.bytes_free() == 0x10000ULL);
