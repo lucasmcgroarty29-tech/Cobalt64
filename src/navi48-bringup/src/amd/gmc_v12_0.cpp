@@ -2175,8 +2175,8 @@ gmc_vmfrag_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     if (!h.inited || !dev.ip.isResolved(h.ip)) {
         GMC_LOG("vmfrag: GFXHUB not ready — skipping"); return kIOReturnNotReady;
     }
-    if (!inst.inited || !inst.enabled) {
-        GMC_LOG("vmfrag: SDMA%u QUEUE0 is not running — skipping", inst.instance);
+    if (!inst.inited || !inst.enabled || inst.submission_uncertain) {
+        GMC_LOG("vmfrag: SDMA%u is not in a known-good submission state — skipping", inst.instance);
         return kIOReturnNotReady;
     }
 
