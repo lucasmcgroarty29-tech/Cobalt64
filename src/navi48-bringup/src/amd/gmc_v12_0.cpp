@@ -1806,6 +1806,7 @@ kern_return_t
 gmc_bind_existing(DeviceContext &dev, GMCContext &gmc, uint64_t busAddr,
                   uint64_t sizeBytes, uint64_t *outMcAddr)
 {
+    if (outMcAddr != nullptr) *outMcAddr = 0;
     if (!gmc.inited)          return kIOReturnNotReady;
     if (gmc.gart_pt_bus == 0) return kIOReturnNotReady;
     if (outMcAddr == nullptr || busAddr == 0) return kIOReturnBadArgument;
