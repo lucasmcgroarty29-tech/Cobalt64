@@ -1,0 +1,14 @@
+CXX ?= c++
+CXXFLAGS ?= -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer
+
+.PHONY: test clean
+
+test: build/test_gart_range_allocator
+	./build/test_gart_range_allocator
+
+build/test_gart_range_allocator: ../../src/amd/gart_range_allocator.cpp test_gart_range_allocator.cpp ../../src/amd/gart_range_allocator.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -I../../src/amd ../../src/amd/gart_range_allocator.cpp test_gart_range_allocator.cpp -o $@
+
+clean:
+	rm -rf build
