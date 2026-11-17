@@ -1547,9 +1547,10 @@ IOReturn n1c_ctx(const N1cRef &ref, const n48n_ctx *in, n48n_ctx *out) {
 // session's lock and gCliLock (the GART table and the VMID-0 TLB are shared).
 static uint32_t resolve_fence(Session *s, uint32_t handle, uint32_t off, uint64_t *addr) {
     const Bo &b = s->bo[handle];
-    const FenceWindow &win = gWin[s->slot];
+    FenceWindow &win = gWin[s->slot];
     if (b.kind == kBoHost) return kNotPermitted;   // 0.0.612: an imported range of the caller's memory is never a kernel-written fence target
     if (b.kind != kBoGtt) { *addr = fence_addr_vram(b.mc, off); return kOk; }
+    if (win.poisoned) return kNotReady;
     const uint32_t page = off / (uint32_t)kPage;
     bool isNew = false;
     const int slot = fence_slot_pick(s->fslot, N48N_FENCE_SLOTS, handle, page, &isNew);
@@ -1559,9 +1560,17 @@ static uint32_t resolve_fence(Session *s, uint32_t handle, uint32_t off, uint64_
         // encoding gmc_bind_existing uses (PTEFlags::SYSMEM_RW on the page's bus address), inside the window reserved at first open.
         const uint64_t pte = ((b.sm.bus + (uint64_t)page * kPage) & ~0xFFFull) | PTEFlags::SYSMEM_RW;
         bar0_memcpy_to_vram(*gCtx->dev, gCtx->gmc.gart_pt_vram_offset + (win.gartOff / kPage + (uint64_t)slot) * 8ull, &pte, sizeof(pte));
-        amdgpu_hdp_flush(*gCtx->dev);
+        if (!amdgpu_hdp_flush(*gCtx->dev)) {
+            win.poisoned = true;
+            N1C_LOG("fence target refused: HDP flush unavailable; slot %u GART window quarantined", s->slot);
+            return kNotReady;
+        }
         const uint32_t f = flush_vmid(0);
-        if (f != kOk) return f;
+        if (f != kOk) {
+            win.poisoned = true;
+            N1C_LOG("fence target refused: VMID-0 invalidation failed; slot %u GART window quarantined", s->slot);
+            return f;
+        }
         s->fslot[slot] = FenceSlot{ handle, page, 1 };
     }
     *addr = fence_addr_gtt(win.mc, (uint32_t)slot, off);
@@ -2192,8 +2201,8 @@ struct G1Env {
             rc = pt_map(s->rootPa, kTestVa, kTestBytes / kPage, pa_of_mc(a.gpu_va), leaf_flags(vmf, true, false), mem);
             if (rc != kOk) break;
             s->maps[0] = VaEnt{ kTestVa, kTestBytes, 0, 1u, vmf };
-            amdgpu_hdp_flush(dev);
-            rc = flush_vmid(kNativeVmid);
+            if (!amdgpu_hdp_flush(dev)) rc = kNotReady;
+            else rc = flush_vmid(kNativeVmid);
         } while (false);
         IOLockUnlock(gCliLock);
         N1C_LOG("g1 hangtest: test BO %s (rc %#x): 16 KiB visible VRAM at BAR0 %#llx mapped R|W|X|UC at VMID-8 VA %#llx",
@@ -2242,8 +2251,12 @@ struct G1Env {
             IOLockLock(gCliLock);
             const uint32_t v = kWaitRefNever;
             bar0_memcpy_to_vram(dev, gG1.boOff + kPollOff, &v, sizeof(v));
-            amdgpu_hdp_flush(dev);
+            const bool flushed = amdgpu_hdp_flush(dev);
             IOLockUnlock(gCliLock);
+            if (!flushed) {
+                N1C_LOG("g1 hangrecover release refused: HDP flush window unavailable");
+                return kNotReady;
+            }
             N1C_LOG("g1 hangrecover release: the CPU wrote %#x to the poll dword (a harness control: the WAIT_REG_MEM may now end)", v);
             return kOk;
         }
