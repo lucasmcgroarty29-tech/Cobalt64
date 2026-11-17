@@ -673,3 +673,8 @@ The Queue-1 routing self-test now treats a published WPTR without a confirmed fe
 Queue-0 ring, constant-fill, linear-copy and VMID IB-copy helpers now set `submission_uncertain` when a published command fails to produce its fence. This blocks later submissions rather than allowing another packet to be appended behind a command whose completion is unknown. The SRBM diagnostic applies the same rule and retains its IB allocation after a timeout.
 
 The Queue-1 self-test also stops after a successful kick without a fence, or after an uncertain WPTR publication. It does not attempt a second kick or release the scratch ring in those cases. After a completed test, it reads back both RB_ENABLE and IB_ENABLE and only releases the scratch ring when both are confirmed clear.
+
+
+## SDMA fail-stop lifetime through teardown (2026-11-17)
+
+The instance-level uncertain state is now sticky across ordinary release/resume paths. `sdma_gfx_resume_instance` refuses to restart an uncertain instance, and `sdma_release_storage` refuses to return its ring or writeback backing to the allocator or OS. This preserves the backing through driver teardown rather than assuming that disabling a queue or timing out a fence proves DMA has stopped. A fresh device initialisation is required to establish a clean instance state.
