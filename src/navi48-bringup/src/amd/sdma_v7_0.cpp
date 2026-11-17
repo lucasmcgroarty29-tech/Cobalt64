@@ -990,9 +990,9 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
         return kIOReturnBadArgument;
     }
     if (!inst.inited || inst.submission_uncertain || !inst.enabled) {
-        SDMA_LOG("q1-selftest: SDMA%u is not in a known-good submission state or QUEUE0 is not running — skipping",
-                 "unhalt and the instance-wide registers come from its resume)",
-                 inst.instance);
+        SDMA_LOG("q1-selftest: SDMA%u is not in a known-good submission state or QUEUE0 is not running — skipping (inited=%d uncertain=%d enabled=%d)",
+                 inst.instance, (int)inst.inited, (int)inst.submission_uncertain,
+                 (int)inst.enabled);
         return kIOReturnNotReady;
     }
     if (inst.wb_bus == 0) return kIOReturnNotReady;
