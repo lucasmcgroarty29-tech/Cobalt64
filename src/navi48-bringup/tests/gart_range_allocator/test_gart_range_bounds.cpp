@@ -33,10 +33,10 @@ static void test_ranges_and_pte_bounds(void)
     assert(!gart_checked_range(16384, 16384, 4096));
     assert(!gart_checked_range(16384, UINT64_MAX, 4096));
     assert(!gart_checked_range(16384, 0, 0));
-    assert(gart_ranges_overlap(16384, 0xC000, 0x4000, 0xF000, 0x1000));
-    assert(gart_ranges_overlap(16384, 0xF000, 0x1000, 0xC000, 0x4000));
-    assert(!gart_ranges_overlap(16384, 0xB000, 0x1000, 0xC000, 0x4000));
-    assert(!gart_ranges_overlap(16384, 0xC000, 0x1000, 0xD000, 0x1000));
+    assert(gart_ranges_overlap(0x10000, 0xC000, 0x4000, 0xF000, 0x1000));
+    assert(gart_ranges_overlap(0x10000, 0xF000, 0x1000, 0xC000, 0x4000));
+    assert(!gart_ranges_overlap(0x10000, 0xB000, 0x1000, 0xC000, 0x4000));
+    assert(!gart_ranges_overlap(0x10000, 0xC000, 0x1000, 0xD000, 0x1000));
     assert(!gart_ranges_overlap(16384, UINT64_MAX, 1, 0, 4096));
     uint64_t reserved_end = 0;
     assert(gart_checked_bump_reserved_end(16384, 12288, 12288, &reserved_end));
