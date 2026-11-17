@@ -276,9 +276,16 @@ static kern_return_t ensure_gfxhub_gart(BringupContext &ctx) {
     kern_return_t r = gmc_gfxhub_gart_enable(dev, ctx.gmc);
     if (r != kIOReturnSuccess) { INIT_LOG("gfxhub: gart_enable failed %#x", r); return r; }
     gmc_hdp_flush(dev);
-    gmc_flush_gpu_tlb(dev, ctx.gmc, ctx.gmc.gfxhub, /*vmid*/ 0, /*type*/ 0);
+    r = gmc_flush_gpu_tlb(dev, ctx.gmc, ctx.gmc.gfxhub, /*vmid*/ 0, /*type*/ 0);
+    if (r != kIOReturnSuccess) {
+        INIT_LOG("gfxhub: VMID-0 TLB invalidation failed %#x — GART remains NOT READY", r);
+        return r;
+    }
     r = gart_init(dev, ctx.gmc, ctx.gart);
-    if (r != kIOReturnSuccess) INIT_LOG("gfxhub: gart_init failed %#x — GTT buffers unavailable", r);
+    if (r != kIOReturnSuccess) {
+        INIT_LOG("gfxhub: gart_init failed %#x — refusing to publish GART readiness", r);
+        return r;
+    }
     ctx.gfxhubReady = true;
     INIT_LOG("gfxhub: GART live on the GC hub (pt=0x%llx)", (unsigned long long)ctx.gmc.gart_pt_bus);
     return kIOReturnSuccess;
