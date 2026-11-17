@@ -63,6 +63,7 @@
 #include <IOKit/IOLib.h>
 
 #include "amdgpu_sdma.h"
+#include "amdgpu_range_bounds.h"
 #include "amdgpu_gmc.h"
 #include "amdgpu_log.h"
 #include "amdgpu_psp.h"
@@ -94,7 +95,7 @@ uint32_t
 sdma_wb_read32(const DeviceContext &dev, const SDMAInstance &inst,
                uint32_t byte_offset)
 {
-    if (byte_offset + 4 > kSDMAWBPageBytes) return 0xFFFFFFFFu;
+    if (!amdgpu_range_fits(kSDMAWBPageBytes, byte_offset, 4)) return 0xFFFFFFFFu;
     if (inst.wb_in_vram) {
         // Drain HDP so the CPU-side read sees what the engine wrote.
         amdgpu_hdp_flush(dev);
@@ -209,7 +210,7 @@ sdma_alloc_storage(DeviceContext &dev, SDMAInstance &inst, GMCContext &gmc)
     // Deviation D6: CPU ring writes go through BAR0, so the ring must
     // land inside the mapped aperture — otherwise WBAR0_32 silently
     // drops every packet and the engine spins on stale memory.
-    if (inst.ring_vram_off + kSDMARingDefaultBytes > dev.bar0Size) {
+    if (!amdgpu_range_fits(dev.bar0Size, inst.ring_vram_off, kSDMARingDefaultBytes)) {
         SDMA_LOG("instance %u: ring vram_off %#llx + %u outside BAR0 "
                  "(bar0Size=%llu) — refusing",
                  inst.instance, (unsigned long long)inst.ring_vram_off,
@@ -268,7 +269,7 @@ sdma_alloc_storage(DeviceContext &dev, SDMAInstance &inst, GMCContext &gmc)
         inst.wb_in_vram  = true;
         inst.wb_bus      = wb_alloc.gpu_va;
         inst.wb_vram_off = wb_alloc.gpu_va - gmc.vram_start;
-        if (inst.wb_vram_off + kSDMAWBPageBytes > dev.bar0Size) {
+        if (!amdgpu_range_fits(dev.bar0Size, inst.wb_vram_off, kSDMAWBPageBytes)) {
             SDMA_LOG("instance %u: WB vram_off %#llx outside BAR0 — refusing",
                      inst.instance, (unsigned long long)inst.wb_vram_off);
             gmc.vram_alloc.free(wb_alloc);
@@ -612,7 +613,7 @@ sdma_kick_external_doorbell(const DeviceContext &dev, const SDMAInstance &inst,
 
     // 3) BAR2 doorbell, dword-indexed (byte offset = index * 4).
     const uint64_t offs = static_cast<uint64_t>(doorbellIndex) * 4ull;
-    if (dev.bar2 == nullptr || offs + 8 > dev.bar2Size) {
+    if (dev.bar2 == nullptr || !amdgpu_range_fits(dev.bar2Size, offs, 8)) {
         SDMA_LOG("SDMA%u ext-kick: doorbell offset %#llx outside BAR2 "
                  "(bar2Size=%llu) — MMIO WPTR path only",
                  inst.instance, (unsigned long long)offs,
@@ -979,7 +980,7 @@ sdma_q1_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     // CPU ring writes go through BAR0: outside the aperture WBAR0_32 drops them
     // silently and the engine would fetch stale memory (the same trap
     // sdma_alloc_storage guards).
-    if (ring_off + kRingBytes > dev.bar0Size) {
+    if (!amdgpu_range_fits(dev.bar0Size, ring_off, kRingBytes)) {
         SDMA_LOG("q1-selftest: scratch ring vram_off %#llx + %u is outside BAR0 "
                  "(%llu bytes) — skipping", (unsigned long long)ring_off,
                  kRingBytes, (unsigned long long)dev.bar0Size);
@@ -1299,7 +1300,7 @@ sdma_srbm_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
         return kIOReturnNoMemory;
     }
     const uint64_t ib_off = ib.gpu_va - gmc.vram_start;
-    if (ib_off + 4096 > dev.bar0Size) {
+    if (!amdgpu_range_fits(dev.bar0Size, ib_off, 4096)) {
         SDMA_LOG("srbm-test: IB page vram_off %#llx is outside BAR0 (%llu bytes) "
                  "— skipping", (unsigned long long)ib_off,
                  (unsigned long long)dev.bar0Size);
@@ -2108,7 +2109,7 @@ sdma_vram_copy_sweep(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst)
         return kIOReturnNoSpace;
     }
     const uint64_t rOff = rgn.gpu_va - gmc.vram_start;
-    if (rOff + kRegionBytes > dev.bar0Size) {
+    if (!amdgpu_range_fits(dev.bar0Size, rOff, kRegionBytes)) {
         SDMA_LOG("copy_sweep: region vram_off %#llx + %u is outside the BAR0 "
                  "aperture (%#llx) — REFUSING (we stage through BAR0)",
                  (unsigned long long)rOff, kRegionBytes,
