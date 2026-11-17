@@ -2004,9 +2004,18 @@ sdma_vram_copy_test(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
 
     kern_return_t r = sdma_copy_linear_test(dev, inst, src.gpu_va, dst.gpu_va,
                                             bytes, /*timeout_us=*/100000ull);
+    if (r != kIOReturnSuccess) {
+        // A failed wait does not prove the engine stopped touching either
+        // allocation. Retain both rather than recycling memory under a live DMA.
+        res.kr = r; res.bytes = bytes; res.dwords = n_dwords;
+        res.src_gpu_va = src.gpu_va; res.dst_gpu_va = dst.gpu_va;
+        if (out) *out = res;
+        SDMA_LOG("vram_copy_test: command did not complete successfully (%#x); src %#llx and dst %#llx quarantined",
+                 r, (unsigned long long)src.gpu_va, (unsigned long long)dst.gpu_va);
+        return r;
+    }
 
-    // Read back regardless of fence status — even a partial copy tells
-    // us whether the engine touched dst at all.
+    // The fence has completed, so the engine no longer owns these ranges.
     uint32_t mismatched = 0;
     uint32_t first_bad_off = 0;
     bool first_bad_set = false;
@@ -2237,6 +2246,11 @@ sdma_vram_copy_sweep(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst)
             sdma_copy_linear_test(dev, inst, rgn.gpu_va + K.src_off,
                                   rgn.gpu_va + K.dst_off, K.bytes,
                                   /*timeout_us=*/500000ull, K.cpv != 0);
+        if (r != kIOReturnSuccess) {
+            SDMA_LOG("copy_sweep c=%u: DMA did not complete successfully (%#x); region %#llx retained because the engine may still own it",
+                     c, r, (unsigned long long)rgn.gpu_va);
+            return r;
+        }
         if (!amdgpu_hdp_flush(dev)) {
             SDMA_LOG("copy_sweep c=%u: HDP flush unavailable before readback; result is untrusted and region %#llx retained",
                      c, (unsigned long long)rgn.gpu_va);
