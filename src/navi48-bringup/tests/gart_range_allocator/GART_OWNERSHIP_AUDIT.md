@@ -690,3 +690,8 @@ Several CP and native GFX paths had extra unchecked HDP flushes immediately befo
 ## CP queue mapping ownership and release guards (2026-11-17)
 
 CP and MEC queue storage is also retained while its MES mapping is still active, even if the most recent fence completed. `cp_release_storage` refuses to free the GFX ring/MQD/WB while `kgq_mapped` remains true; `cp_compute_queue_release` similarly refuses while `cq.mapped` is true. A failed MES ADD_QUEUE acknowledgement marks the relevant queue state uncertain, because the firmware may have applied the mapping even when the host did not receive a clean acknowledgement.
+
+
+## PDB0 inconclusive staging is not a failed mapping verdict (2026-11-17)
+
+The PDB0 diagnostic now distinguishes a failed SDMA completion from an unavailable HDP staging drain. In either case it stops before reading a destination that may be stale, before running later legs, and before reverting CONTEXT0 on an inconclusive result. The per-leg VRAM destination is retained if its poison/pattern staging was not acknowledged; the GART sysmem page remains bound as before. This prevents an HDP access failure from being misreported as evidence that PDB0 address translation is broken.
