@@ -16,6 +16,7 @@ on:
       - "src/navi48-bringup/src/amd/mes_v12_1.cpp"
       - "src/navi48-bringup/src/amd/psp_v14_0.cpp"
       - "src/navi48-bringup/src/Navi48Bringup.cpp"
+      - "src/navi48-bringup/src/amd/native_s1b.cpp"
       - "src/navi48-bringup/src/amd/gmc_v12_0.cpp"
       - "src/navi48-bringup/src/amd/amdgpu_gart.cpp"
       - "src/navi48-bringup/tests/gart_range_allocator/**"
