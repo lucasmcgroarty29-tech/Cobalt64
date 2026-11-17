@@ -577,7 +577,11 @@ compute_dispatch_test(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
     // uninitialised VRAM.
     bar0_memset_vram(dev, code_off, kSEndpgm, kEndpgmFillDwords * 4);
     bar0_memcpy_to_vram(dev, code_off, sh_code, sh_size);
-    (void)gmc_hdp_flush(dev);
+    if (gmc_hdp_flush(dev) != kIOReturnSuccess) {
+            CS_LOG("compute test: HDP flush unavailable; refusing to continue with staged GPU data");
+            r.kr = kIOReturnNotReady;
+            return kIOReturnNotReady;
+        }
 
     // Verify the copy through the GPU's own view of VRAM, not the CPU's.
     {
@@ -638,7 +642,11 @@ compute_dispatch_test(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
         bar0_memset_vram(dev, karg_off, 0, 4096);
         bar0_memcpy_to_vram(dev, karg_off,     &a_lo, 4);
         bar0_memcpy_to_vram(dev, karg_off + 4, &a_hi, 4);
-        (void)gmc_hdp_flush(dev);
+        if (gmc_hdp_flush(dev) != kIOReturnSuccess) {
+            CS_LOG("compute test: HDP flush unavailable; refusing to continue with staged GPU data");
+            r.kr = kIOReturnNotReady;
+            return kIOReturnNotReady;
+        }
         CS_LOG("kernarg buffer at vram+%#llx (mc %#llx): [0..7] = result mc %#llx, "
                "GPU-side readback %#010x %#010x",
                (unsigned long long)karg_off, (unsigned long long)karg_va,
@@ -647,7 +655,11 @@ compute_dispatch_test(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
     }
 
     bar0_memset_vram(dev, res_off, kComputePoison, kResultBytes);
-    (void)gmc_hdp_flush(dev);
+    if (gmc_hdp_flush(dev) != kIOReturnSuccess) {
+            CS_LOG("compute test: HDP flush unavailable; refusing to continue with staged GPU data");
+            r.kr = kIOReturnNotReady;
+            return kIOReturnNotReady;
+        }
     {
         const uint32_t p0 = RVRAM32_via_mm(dev, res_off);
         const uint32_t p1 = RVRAM32_via_mm(dev, res_off + 4);
@@ -686,7 +698,11 @@ compute_dispatch_test(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
                          uint32_t *fence_out) -> kern_return_t {
         if (n == 0 || (uint64_t)n * 4 > kIbBytes) return kIOReturnBadArgument;
         bar0_memcpy_to_vram(dev, ib_off, dw, n * 4);
-        (void)gmc_hdp_flush(dev);
+        if (gmc_hdp_flush(dev) != kIOReturnSuccess) {
+            CS_LOG("compute test: HDP flush unavailable; refusing to continue with staged GPU data");
+            r.kr = kIOReturnNotReady;
+            return kIOReturnNotReady;
+        }
         for (uint32_t i = 0; i < n; i++) {
             const uint32_t got = RVRAM32_via_mm(dev, ib_off + i * 4);
             if (got != dw[i]) {
@@ -774,7 +790,11 @@ compute_dispatch_test(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
     }
     const uint64_t ibt_off = ibt.gpu_va - gmc.vram_start;
     bar0_memset_vram(dev, ibt_off, kComputePoison, 64);
-    (void)gmc_hdp_flush(dev);
+    if (gmc_hdp_flush(dev) != kIOReturnSuccess) {
+            CS_LOG("compute test: HDP flush unavailable; refusing to continue with staged GPU data");
+            r.kr = kIOReturnNotReady;
+            return kIOReturnNotReady;
+        }
     {
         uint32_t t[5];
         t[0] = pm4_type3(kOpWriteData, 3);
