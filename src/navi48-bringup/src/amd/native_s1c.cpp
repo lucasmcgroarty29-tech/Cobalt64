@@ -172,7 +172,7 @@ static volatile UInt32 gBar0Conflict;   // 0.0.663 (ReBAR item 5): 0 = not latch
 static bool gLegacyLogged[8];
 static uint32_t gSubmitBuf[280];   // one Submit's dwords; 0.0.627: used only under gRingLock (ring_submit)
 
-struct FenceWindow { bool reserved; uint64_t gartOff; uint64_t mc; };
+struct FenceWindow { bool reserved; bool poisoned; uint64_t gartOff; uint64_t mc; };
 static FenceWindow gWin[kMaxSessions];   // 0.0.627 (G2): one 16-page window per slot (slot 0's is the 0.0.626 window)
 struct ParkRoot { bool have; VRAMAllocation a; uint64_t pa; };
 static ParkRoot gPark;
@@ -767,6 +767,7 @@ IOReturn n1c_open(BringupContext &ctx, bool ws, N1cRef *out) {
         if (!ctxOk) { rc = kIOReturnNotReady; break; }
         // The slot's fence window: 16 GART pages reserved once per boot from the same bump allocator the ring, MQD and write-back page came from.
         FenceWindow &win = gWin[slot];
+        if (win.poisoned) { N1C_LOG("open refused (NotReady): this slot's fence GART window is quarantined after an unacknowledged invalidation"); rc = kIOReturnNotReady; break; }
         if (!win.reserved) {
             GMCContext &gmc = ctx.gmc;
             const uint64_t bytes = (uint64_t)N48N_FENCE_SLOTS * kPage;
@@ -935,17 +936,29 @@ void n1c_close(const N1cRef &ref, const char *how) {
         if (program_root(s->vmid, gPark.pa) != kOk) leak = true; else parked = true;
     }
     if (!leak) {
-        for (uint32_t h = 1; h < N48N_MAX_BOS; h++) if (s->boUsed[h]) bo_release(s, h, kRelClosing);
         bool slots = false;
-        const FenceWindow &win = gWin[s->slot];
+        FenceWindow &win = gWin[s->slot];
         for (uint32_t i = 0; i < N48N_FENCE_SLOTS; i++) {
             if (!s->fslot[i].used) continue;
             const uint64_t zero = 0;
             bar0_memcpy_to_vram(dev, gCtx->gmc.gart_pt_vram_offset + (win.gartOff / kPage + i) * 8ull, &zero, sizeof(zero));
-            s->fslot[i].used = 0; slots = true;
+            slots = true;
         }
-        if (slots) { amdgpu_hdp_flush(dev); (void)flush_vmid(0); }
-        pt_release_blocks(s);   // into the reserve, not vram_alloc
+        // Fence-window PTEs are shared by VMID 0. Retire them BEFORE releasing any BO backing.
+        if (slots) {
+            const bool hdpOk = amdgpu_hdp_flush(dev);
+            const bool tlbOk = hdpOk && (flush_vmid(0) == kOk);
+            if (!tlbOk) {
+                win.poisoned = true;
+                leak = true;
+                N1C_LOG("close: fence-window invalidation not acknowledged (HDP=%u); slot %u window quarantined and all BO backing retained", hdpOk ? 1u : 0u, s->slot);
+            }
+        }
+        if (!leak) {
+            for (uint32_t i = 0; i < N48N_FENCE_SLOTS; i++) s->fslot[i] = FenceSlot{ 0, 0, 0 };
+            for (uint32_t h = 1; h < N48N_MAX_BOS; h++) if (s->boUsed[h]) bo_release(s, h, kRelClosing);
+            pt_release_blocks(s);   // into the reserve, not vram_alloc
+        }
         N1C_LOG("client closed (%s): slot %u VMID %u: %u BOs (%llu MiB VRAM, %llu MiB GTT), %u PT pages, %llu seqs, freed", how, s->slot, s->vmid, nBos,
                 (unsigned long long)(vramB >> 20), (unsigned long long)(gttB >> 20), ptPages, (unsigned long long)seqs);
         if (nHost != 0u) N1C_LOG("client closed (%s): %u host imports (%llu KiB) unmapped, then completed and released", how, nHost, (unsigned long long)(hostB >> 10));   // 0.0.612
@@ -1015,7 +1028,7 @@ static void bo_release(Session *s, uint32_t h, RelMode mode) {
             if (va_ent_used(e) && e.handle == h) { pt_unmap(s->rootPa, e.start, e.size / kPage, mem); touched = true; }
         }
         bool memOk = true;   // review item D: false once a TLB flush did not acknowledge (HUNG): the memory of this BO is then leaked, like the HUNG leak
-        if (touched) { amdgpu_hdp_flush(*gCtx->dev); memOk = memory_may_free_after_flush(flush_vmid(s->vmid)) && memOk; }
+        if (touched) { const bool hdpOk = amdgpu_hdp_flush(*gCtx->dev); memOk = hdpOk && memory_may_free_after_flush(flush_vmid(s->vmid)) && memOk; }
         bool slotCleared = false;
         for (uint32_t i = 0; i < N48N_FENCE_SLOTS; i++) {
             if (s->fslot[i].used && s->fslot[i].handle == h) {
@@ -1025,12 +1038,18 @@ static void bo_release(Session *s, uint32_t h, RelMode mode) {
                 slotCleared = true;
             }
         }
-        if (slotCleared) { amdgpu_hdp_flush(*gCtx->dev); memOk = memory_may_free_after_flush(flush_vmid(0)) && memOk; }
-        if (b.vmd != nullptr) { b.vmd->release(); b.vmd = nullptr; }   // the descriptor is released once, before the range it names is freed
-        if (b.kind == kBoGtt) { if (memOk) { sysmem_free(b.sm); sys_release(b); } }   // review item D: a flush that did not acknowledge leaks the GTT pages (they stay counted, R4)
-        else if (b.kind == kBoHi) { gCtx->gmc.vram_alloc_hi.free(b.a); budget_release(b); }
-        else if (b.kind == kBoVis) { gCtx->gmc.vram_alloc.free(b.a); budget_release(b); }
-        else if (b.kind == kBoHost && host_may_release(kHostRelNormal) && memOk) { host_release(b); sys_release(b); }   // 0.0.612: AFTER pt_unmap and flush_vmid above (unmap before complete)
+        if (slotCleared) { const bool hdpOk = amdgpu_hdp_flush(*gCtx->dev); memOk = hdpOk && memory_may_free_after_flush(flush_vmid(0)) && memOk; }
+        if (memOk) {
+            if (b.vmd != nullptr) { b.vmd->release(); b.vmd = nullptr; }   // descriptor first, then backing range
+            if (b.kind == kBoGtt) { sysmem_free(b.sm); sys_release(b); }
+            else if (b.kind == kBoHi) { gCtx->gmc.vram_alloc_hi.free(b.a); budget_release(b); }
+            else if (b.kind == kBoVis) { gCtx->gmc.vram_alloc.free(b.a); budget_release(b); }
+            else if (b.kind == kBoHost && host_may_release(kHostRelNormal)) { host_release(b); sys_release(b); }
+        } else {
+            // No acknowledged HDP + VMID invalidation: retain descriptor and every backing allocation.
+            // The software BO record is dropped below, intentionally turning these resources into a boot-lifetime quarantine.
+            N1C_LOG("BO %u backing retained: HDP/TLB invalidation was not acknowledged", h);
+        }   // 0.0.612: AFTER pt_unmap and flush_vmid above (unmap before complete)
     } else {
         // Leak: the memory, the PTEs and any fence-slot PTE stay; only the software records go.
         for (uint32_t i = 0; i < N48N_FENCE_SLOTS; i++) if (s->fslot[i].used && s->fslot[i].handle == h) s->fslot[i].used = 0;
