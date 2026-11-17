@@ -522,3 +522,10 @@ This closes the immediate false-success path for these reviewed submissions.
 Other diagnostic and scanout experiment callsites still contain best-effort
 flush calls and require a separate per-function review. No physical-device
 flush acknowledgement or native kext build has been demonstrated.
+
+
+## Host-tested HDP remap selection policy (2026-11-17)
+
+The NBIO remap-window selection logic is now isolated in the pure `hdp_flush_policy.h` helper and covered by a dedicated host test. Cases cover base-index-2 preference, base-index-0 fallback, zero/sentinel values, misalignment, aperture overflow, the exact final valid dword, and a null output pointer. The IOKit helper uses this same selection function.
+
+These tests validate only the address-selection policy. They do not execute MMIO writes, prove that the remap register is correctly programmed on Navi48, or establish hardware flush completion.
