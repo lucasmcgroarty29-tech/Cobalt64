@@ -711,9 +711,10 @@ kern_return_t run_stage(BringupContext &ctx, BringupStage s) {
                     dw[3] = (uint32_t)(tgt.gpu_va >> 32);
                     dw[4] = magic;
                     bar0_memcpy_to_vram(dev, ib_off, dw, sizeof(dw));
-                    (void)gmc_hdp_flush(dev);
+                    kern_return_t sr = gmc_hdp_flush(dev);
                     uint32_t f = 0;
-                    kern_return_t sr = cp_compute_submit_ib(dev, ctx.kcq, ib.gpu_va, 5, 0, &f);
+                    if (sr == kIOReturnSuccess)
+                        sr = cp_compute_submit_ib(dev, ctx.kcq, ib.gpu_va, 5, 0, &f);
                     uint64_t obs = 0, el = 0;
                     if (sr == kIOReturnSuccess)
                         sr = cp_compute_wait_fence(ctx.kcq, f, 2000000, &obs, &el);
