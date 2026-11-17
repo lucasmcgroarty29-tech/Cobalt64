@@ -1381,8 +1381,12 @@ sdma_ring_write(const DeviceContext &dev, SDMAInstance &inst,
         WBAR0_32(dev, inst.ring_vram_off + slot * 4u, src[i]);
     }
     // Ensure HDP write buffers drain so the engine sees the new
-    // packets when it processes the doorbell.
-    amdgpu_hdp_flush(dev);
+    // packets when it processes the doorbell. Keep the committed pointer
+    // unchanged if this flush cannot be issued; staged dwords remain unpublished.
+    if (!amdgpu_hdp_flush(dev)) {
+        SDMA_LOG("SDMA%u ring_write refused: HDP flush window unavailable", inst.instance);
+        return 0;
+    }
     // 0.0.343 — sdma-wptr-freerunning. The POINTER, upstream's ptr_mask
     // (amdgpu_ring.c:134/347-349), which is all-ones for SDMA v7. Masking it here with buf_mask was
     // the bug: it folded the wptr to 0 every 4096 dwords, so sdma_kick_doorbell handed the engine a
@@ -1426,8 +1430,11 @@ sdma_kick_doorbell(const DeviceContext &dev, const SDMAInstance &inst)
                     static_cast<uint32_t>(v >> 32));
 
     // 2) HDP flush so the engine's read of wptr_poll_addr drains past
-    //    our CPU write.
-    amdgpu_hdp_flush(dev);
+    //    our CPU write. Do not publish the pointer through either path on failure.
+    if (!amdgpu_hdp_flush(dev)) {
+        SDMA_LOG("SDMA%u kick refused: HDP flush window unavailable", inst.instance);
+        return kIOReturnNotReady;
+    }
 
     // 3) BAR2 doorbell aperture write — port of upstream WDOORBELL64.
     //    On the reference platform (Apple Silicon + TB5) this write did
