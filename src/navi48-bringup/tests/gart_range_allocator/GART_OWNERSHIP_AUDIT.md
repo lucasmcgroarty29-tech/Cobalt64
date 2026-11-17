@@ -549,3 +549,12 @@ The native S1c shared GFX ring now stages packet dwords first and checks HDP bef
 The SDMA external queue kick paths now check HDP before writing either the BAR2 doorbell or the MMIO write pointer. CP queue publication now checks HDP before marking GFX/compute MQDs ready, before MES ADD_QUEUE for the GFX/compute queues, and in the central CP doorbell helper. The direct compute queue submit path stages its write pointer locally and leaves the committed pointer unchanged if HDP fails.
 
 These gates address the reviewed submission boundaries only. Remaining direct flush calls in diagnostic, readback, scanout experiments, initialization and CP scratch-test paths still require per-caller classification. A checked true result means the remap write/readback path was available; it is not a GPU completion fence. The host CI does not compile these IOKit sources.
+
+
+## Native VM map and open-path HDP failure handling (2026-11-17)
+
+The native session open path now refuses to publish a new fence window, park root, or session root when the checked HDP flush is unavailable. A newly allocated park root is returned to the VRAM pool only because it has not yet been installed in a GPU context; a failed fence-window initialization permanently poisons that reserved slot range.
+
+Host-import mapping and ordinary VA MAP now retain the BO and software mapping record if HDP or TLB acknowledgement fails, so a later BO release cannot mistakenly recycle the backing memory. VA UNMAP now removes the software map record only after both HDP and VMID invalidation succeed. If either step fails, the map record remains as a quarantine reference and backing memory cannot be safely returned.
+
+The remaining native S1c direct flushes include diagnostic/test setup, ring scrub and other paths that need per-operation review. These edits remain uncompiled IOKit source changes; host CI cannot validate their C++ or runtime behavior.
