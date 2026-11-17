@@ -1,5 +1,4 @@
 #include "gart_mapping_lifecycle.h"
-#include <limits.h>
 
 void gart_lifecycle_init(GARTMappingLifecycle *l, uint32_t required_context_mask) {
     if (!l) return;
