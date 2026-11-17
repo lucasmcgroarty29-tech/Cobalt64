@@ -15,12 +15,16 @@ static bool align_up(uint64_t value, uint64_t alignment, uint64_t *out) {
 
 extern "C" bool
 gart_range_allocator_init(GARTRangeAllocator *a, GARTFreeRange *storage,
-                          size_t capacity, uint64_t total_size) {
-    if (!a || !storage || capacity == 0 || total_size == 0) return false;
+                          size_t capacity, uint64_t total_size,
+                          uint64_t granularity) {
+    if (!a || !storage || capacity == 0 || total_size == 0 ||
+        granularity == 0 || (granularity & (granularity - 1)) != 0 ||
+        total_size % granularity != 0) return false;
     a->ranges = storage;
     a->count = 1;
     a->capacity = capacity;
     a->total_size = total_size;
+    a->granularity = granularity;
     storage[0].offset = 0;
     storage[0].size = total_size;
     return true;
@@ -29,7 +33,9 @@ gart_range_allocator_init(GARTRangeAllocator *a, GARTFreeRange *storage,
 extern "C" bool
 gart_range_allocator_alloc(GARTRangeAllocator *a, uint64_t size,
                            uint64_t alignment, uint64_t *out_offset) {
-    if (!a || !a->ranges || !out_offset || size == 0 || alignment == 0 ||
+    if (!a || !a->ranges || a->count > a->capacity ||
+        a->granularity == 0 || !out_offset || size == 0 ||
+        size % a->granularity != 0 || alignment < a->granularity ||
         (alignment & (alignment - 1)) != 0) return false;
 
     for (size_t i = 0; i < a->count; ++i) {
@@ -71,7 +77,9 @@ gart_range_allocator_alloc(GARTRangeAllocator *a, uint64_t size,
 extern "C" bool
 gart_range_allocator_free(GARTRangeAllocator *a, uint64_t offset,
                           uint64_t size) {
-    if (!a || !a->ranges || size == 0) return false;
+    if (!a || !a->ranges || a->count > a->capacity ||
+        a->granularity == 0 || size == 0 ||
+        offset % a->granularity != 0 || size % a->granularity != 0) return false;
     uint64_t end = 0;
     if (!add_u64(offset, size, &end) || end > a->total_size) return false;
 
