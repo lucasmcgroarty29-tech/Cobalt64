@@ -196,3 +196,30 @@ The visible callers include sequential bring-up allocations (SDMA storage and th
 This creates a potential race: two gmc_bind_existing() calls could reserve the same bump interval, or gmc_bind_at() could check the old bump interval while a concurrent driver allocation is extending it. No concurrency failure has been demonstrated, but the code currently has no obvious shared guard. Before live allocator work, identify every callback's execution context and lock order, then serialize bump reservation and exact-offset overlap checking under one shared sleep-capable lock. Do not add a lock blindly: an unknown callback may already hold a lock that would create an inversion or recursive acquisition.
 
 The lifecycle model assigns mask bits as MMHUB VMIDs 0–15 in bits 0–15 and GFXHUB VMIDs 0–15 in bits 16–31. For example, MMHUB VMID 0 plus GFXHUB VMID 0 is mask 0x00010001. The caller must still determine the actual set of contexts that can cache a given mapping; the model does not infer it.
+
+
+## Checked mapping arithmetic (2026-11-17)
+
+The active GMC bind helpers and the legacy GART bind helpers now share
+`gart_range_bounds.h`, a pure checked-arithmetic layer. Before writing PTEs,
+the bind paths validate page-size rounding, the 32-bit PTE-count limit, the
+GART aperture interval, the physical bus-address span, the page-table index
+range, the absolute page-table VRAM byte range, and the resulting MC address.
+Zero-sized and overflowing requests fail before PTE writes. The legacy
+`gart_bind_sysmem` path also frees its newly allocated `SysMem` block if its
+returned bus span fails validation.
+
+The host suite covers rounding boundaries, zero and overflowing sizes,
+out-of-range intervals, PTE-table bounds, absolute VRAM-offset overflow,
+physical-address alignment and span overflow, and checked addition. It runs
+under AddressSanitizer and UndefinedBehaviorSanitizer. The workflow now runs
+these host checks when either mapping source file or the checked-arithmetic
+header changes.
+
+This is a defensive source change, not proof of a native kext build. The
+host workflow does not compile the IOKit translation units, does not test
+the BAR0 write path, and does not validate hardware register behaviour.
+The existing concurrency, PTE retirement, hub teardown and Apple mapping
+ownership questions remain open. In particular, this change does not add
+locking to the shared bump allocator and must not be interpreted as making
+concurrent mapping safe.
