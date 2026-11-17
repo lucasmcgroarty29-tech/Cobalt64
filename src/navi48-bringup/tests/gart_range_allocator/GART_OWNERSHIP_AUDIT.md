@@ -16,7 +16,7 @@ binding's previous slot.
 
 The new `GARTRangeAllocator` is a possible replacement for the offset bookkeeping
 in this path only, after its users, lifetime and synchronization are proven.
-It is not currently referenced by the kext build or live GART code.
+The top-level kext Makefile's src/amd/*.cpp wildcard compiles this module into the kext, but no live GART code calls it.
 
 ### 2. `GMCContext` mapping helpers
 
