@@ -121,25 +121,38 @@ static void pre_test_snapshot(BringupContext &ctx, const char *test) {
 // CONTEXT0 goes straight back to the flat table.
 //
 // Each leg uses its OWN VRAM page, so one leg cannot mask another.
-static void run_pdb0_selftest(BringupContext &ctx) {
+static kern_return_t run_pdb0_selftest(BringupContext &ctx) {
     DeviceContext &dev = *ctx.dev;
     GMCContext    &gmc = ctx.gmc;
     PDB0SelfTest  &t   = ctx.pdb0Test;
 
-    if (!gmc.pdb0_want) return;
+    if (!gmc.pdb0_want) return kIOReturnSuccess;
     if (!gmc.pdb0_active) {
         INIT_LOG("pdb0 selftest: skipped — navi48-pdb0=1 but the PDB0 was not enabled "
                  "(gmc_pdb0_build refused; see its REFUSING line)");
-        return;
+        return kIOReturnSuccess;
     }
     SDMAInstance &inst = ctx.sdma.instance[0];
-    if (!inst.inited || !inst.enabled || inst.submission_uncertain) {
-        INIT_LOG("pdb0 selftest: skipped — SDMA0 is not in a known-good submission state");
-        return;
+    if (!inst.inited || !inst.enabled) {
+        INIT_LOG("pdb0 selftest: skipped — SDMA0 is not running");
+        return kIOReturnSuccess;
+    }
+    if (inst.submission_uncertain) {
+        INIT_LOG("pdb0 selftest: SDMA0 completion is uncertain; stopping before later bring-up stages");
+        return kIOReturnNotReady;
     }
     t.ran = true;
     constexpr uint32_t kBytes = 4096;
     constexpr uint32_t kDwords = kBytes / 4;
+
+    auto abort_unacknowledged_staging = [&](const char *leg) -> kern_return_t {
+        INIT_LOG("pdb0 selftest: %s staging was not acknowledged; attempting CONTEXT0 revert without reading or recycling test backing", leg);
+        const kern_return_t rr = gmc_pdb0_revert(dev, gmc);
+        t.reverted = (rr == kIOReturnSuccess);
+        if (t.reverted) gmc_pdb0_read_regs(dev, gmc, t.regs);
+        else INIT_LOG("pdb0 selftest: CONTEXT0 revert failed %#x; keeping the test context and allocations quarantined", rr);
+        return rr;
+    };
 
     // ---- (b) IDENTITY control, first: if the packet itself is broken we want
     //          to know before attributing anything to the alias.
@@ -151,7 +164,7 @@ static void run_pdb0_selftest(BringupContext &ctx) {
     VRAMAllocation srcpg {};
     if (!gmc.vram_alloc.alloc(kBytes, kASPageSize, &srcpg)) {
         INIT_LOG("pdb0 selftest: no VRAM for the copy source page - skipping");
-        return;
+        return kIOReturnSuccess;
     }
     const uint64_t srcoff = srcpg.gpu_va - gmc.vram_start;
     bool hdpUnavailable = false;
@@ -178,12 +191,9 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         kern_return_t r = fill_via_copy(ident.gpu_va, pat);
         if (inst.submission_uncertain) {
             INIT_LOG("pdb0 selftest: identity DMA completion unconfirmed; retaining source/destination and leaving PDB0 unchanged");
-            return;
+            return kIOReturnNotReady;
         }
-        if (hdpUnavailable) {
-            INIT_LOG("pdb0 selftest: identity staging was not acknowledged; skipping readback, later legs and CONTEXT0 revert");
-            return;
-        }
+        if (hdpUnavailable) return abort_unacknowledged_staging("identity");
         uint32_t bad = 0;
         for (uint32_t i = 0; i < kDwords; i++)
             if (RBAR0_32(dev, off + (uint64_t)i * 4) != pat) bad++;
@@ -210,12 +220,9 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         kern_return_t r = fill_via_copy(off, pat);
         if (inst.submission_uncertain) {
             INIT_LOG("pdb0 selftest: alias DMA completion unconfirmed; retaining source/destination and leaving PDB0 unchanged");
-            return;
+            return kIOReturnNotReady;
         }
-        if (hdpUnavailable) {
-            INIT_LOG("pdb0 selftest: alias staging was not acknowledged; skipping readback, later legs and CONTEXT0 revert");
-            return;
-        }
+        if (hdpUnavailable) return abort_unacknowledged_staging("alias");
         uint32_t bad = 0;
         for (uint32_t i = 0; i < kDwords; i++)
             if (RBAR0_32(dev, off + (uint64_t)i * 4) != pat) bad++;
@@ -249,12 +256,9 @@ static void run_pdb0_selftest(BringupContext &ctx) {
             kern_return_t r = fill_via_copy(mc, pat);
             if (inst.submission_uncertain) {
                 INIT_LOG("pdb0 selftest: GART DMA completion unconfirmed; retaining bound sysmem and leaving PDB0 unchanged");
-                return;
+                return kIOReturnNotReady;
             }
-            if (hdpUnavailable) {
-                INIT_LOG("pdb0 selftest: GART staging was not acknowledged; skipping readback and CONTEXT0 revert");
-                return;
-            }
+            if (hdpUnavailable) return abort_unacknowledged_staging("GART");
             sysmem_rmb();
             uint32_t bad = 0;
             for (uint32_t i = 0; i < kDwords; i++) if (cpu[i] != pat) bad++;
@@ -280,8 +284,12 @@ static void run_pdb0_selftest(BringupContext &ctx) {
         INIT_LOG("pdb0 selftest: the %s leg FAILED — VMID-0 is worse off than the "
                  "flat table, reverting CONTEXT0 now so the rest of the ladder runs",
                  !t.identity_ok ? "identity" : "gart");
-        (void)gmc_pdb0_revert(dev, gmc);
-        t.reverted = true;
+        const kern_return_t rr = gmc_pdb0_revert(dev, gmc);
+        t.reverted = (rr == kIOReturnSuccess);
+        if (!t.reverted) {
+            INIT_LOG("pdb0 selftest: CONTEXT0 revert failed %#x; stopping bring-up with test backing retained", rr);
+            return rr;
+        }
         gmc_pdb0_read_regs(dev, gmc, t.regs);
     } else if (!t.alias_ok) {
         INIT_LOG("pdb0 selftest: the alias leg FAILED but identity and gart are "
@@ -292,6 +300,7 @@ static void run_pdb0_selftest(BringupContext &ctx) {
                  "resolves 0-based VRAM addresses, our MC window and the GART ***");
     }
     gmc_log_vm_faults(dev, gmc);
+    return kIOReturnSuccess;
 }
 
 static kern_return_t ensure_doorbell_path(BringupContext &ctx) {
@@ -571,7 +580,8 @@ kern_return_t run_stage(BringupContext &ctx, BringupStage s) {
         // Here rather than in stage 17 because the PDB0 went live back at
         // CPInit: measuring now is the last chance to revert before PM4Test
         // and ComputeDispatch run on top of it.
-        run_pdb0_selftest(ctx);
+        const kern_return_t pdb0Result = run_pdb0_selftest(ctx);
+        if (pdb0Result != kIOReturnSuccess) return pdb0Result;
         // 0.0.185: the SDMA0 QUEUE1 doorbell-routing self-test. Opt-in
         // (navi48-sdma-q1-test=1) and a complete no-op otherwise. It programs,
         // fences and then DISABLES QUEUE1, so a plain boot is unchanged and a
@@ -617,6 +627,10 @@ kern_return_t run_stage(BringupContext &ctx, BringupStage s) {
         if (ctx.vmfragTestWant) {
             (void)gmc_vmfrag_selftest(dev, ctx.gmc, ctx.sdma.instance[0],
                                       &ctx.vmfragTest, ctx.vmfragNoValidWant);
+        }
+        if (ctx.sdma.instance[0].submission_uncertain) {
+            INIT_LOG("SDMAInit: DMA completion or queue publication is unconfirmed; stopping before CP/GFX stages");
+            return kIOReturnNotReady;
         }
         return kIOReturnSuccess;   // engine init succeeded; the copy result is reported separately
     }

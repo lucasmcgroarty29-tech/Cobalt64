@@ -1492,7 +1492,6 @@ gmc_pdb0_revert(DeviceContext &dev, GMCContext &gmc)
     GMC_LOG("pdb0: REVERTING GFXHUB CONTEXT0 to the flat single-level GART "
             "table (depth 0, START=%#llx, BASE=the GART PTB)",
             (unsigned long long)gmc.gart_start);
-    gmc.pdb0_active = false;
     hub_init_gart_aperture_regs(dev, gmc, gmc.gfxhub, /*usePDB0*/ false);
     hub_enable_system_domain(dev, gmc.gfxhub, /*depth*/ 0, /*blockSize*/ 0,
                              /*writeBlockSize*/ true);
@@ -1502,7 +1501,8 @@ gmc_pdb0_revert(DeviceContext &dev, GMCContext &gmc)
     }
     kern_return_t r = gmc_flush_gpu_tlb(dev, gmc, gmc.gfxhub, /*vmid*/ 0,
                                         /*type*/ 0);
-    GMC_LOG("pdb0: revert done (TLB flush %#x)", r);
+    if (r == kIOReturnSuccess) gmc.pdb0_active = false;
+    GMC_LOG("pdb0: revert done (TLB flush %#x, active=%d)", r, (int)gmc.pdb0_active);
     return r;
 }
 
