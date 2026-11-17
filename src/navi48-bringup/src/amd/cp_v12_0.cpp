@@ -2655,8 +2655,8 @@ cp_init_full(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
     kern_return_t pr = cp_ring_fetch_probe(dev, cp, /*nops=*/16,
                                            /*timeout_us=*/500000);
     if (pr != kIOReturnSuccess) {
-        CP_LOG("cp_init_full: ring fetch probe FAILED %#x — CP completion is uncertain; refusing to report the legacy ring ready", pr);
-        if (cp.submission_uncertain) return pr;
+        CP_LOG("cp_init_full: ring fetch probe FAILED %#x — refusing to report the legacy ring ready", pr);
+        return pr;
     }
 
     CP_LOG("CP ready (legacy CP_RB0_* path): GFX ring active at doorbell %u "
