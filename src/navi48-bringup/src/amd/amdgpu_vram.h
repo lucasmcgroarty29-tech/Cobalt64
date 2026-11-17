@@ -42,6 +42,7 @@
 #pragma once
 
 #include <stdint.h>
+#include "amdgpu_range_bounds.h"
 
 namespace amdgpu {
 
@@ -63,26 +64,26 @@ public:
     VRAMBumpAllocator() = default;
 
     void init(uint64_t base, uint64_t size, void *cpu_base = nullptr) {
-        m_base       = base;
-        m_size       = size;
-        m_cpu_base   = static_cast<uint8_t *>(cpu_base);
+        m_inited = false;
+        m_base = base;
+        m_size = size;
+        m_cpu_base = static_cast<uint8_t *>(cpu_base);
         m_bytes_used = 0;
         m_alloc_count = 0;
-        // Reset node pool — every node is on the freelist of pool slots
-        // except node 0 which we use as the head of the in-range free
-        // list. (Using indices instead of pointers keeps this header-only
-        // and trivially copy-safe inside other structs.)
+        m_head = kInvalid;
         for (uint32_t i = 0; i < kMaxNodes; i++) {
-            m_pool[i].next     = kInvalid;
-            m_pool[i].in_use   = false;
-            m_pool[i].offset   = 0;
-            m_pool[i].length   = 0;
+            m_pool[i].next = kInvalid;
+            m_pool[i].in_use = false;
+            m_pool[i].offset = 0;
+            m_pool[i].length = 0;
         }
-        // Single initial free range covering the whole allocator.
-        uint16_t root = pool_take();
+        // Reject an empty or wrapping allocator interval before publishing it.
+        if (size == 0 || size > UINT64_MAX - base) return;
+        const uint16_t root = pool_take();
+        if (root == kInvalid) return;
         m_pool[root].offset = 0;
         m_pool[root].length = size;
-        m_pool[root].next   = kInvalid;
+        m_pool[root].next = kInvalid;
         m_head = root;
         m_inited = true;
     }
@@ -91,7 +92,7 @@ public:
     uint64_t base() const { return m_base; }
     uint64_t size() const { return m_size; }
     uint64_t bytes_used() const { return m_bytes_used; }
-    uint64_t bytes_free() const { return m_size - m_bytes_used; }
+    uint64_t bytes_free() const { return m_inited ? m_size - m_bytes_used : 0; }
     uint32_t alloc_count() const { return m_alloc_count; }
 
     // Allocate. alignment must be a power of two (we coerce up to
@@ -100,108 +101,122 @@ public:
     bool alloc(uint64_t bytes, uint64_t alignment, VRAMAllocation *out) {
         if (!m_inited || bytes == 0 || out == nullptr) return false;
         if (alignment < 16384) alignment = 16384;
-        // Round size up to alignment to keep neighbouring allocs aligned
-        // too. Free coalesce will eat the slop on release.
-        uint64_t rounded = (bytes + alignment - 1) & ~(alignment - 1);
+        if ((alignment & (alignment - 1ULL)) != 0 ||
+            bytes > UINT64_MAX - (alignment - 1ULL))
+            return false;
+        const uint64_t rounded = (bytes + alignment - 1ULL) & ~(alignment - 1ULL);
+        if (rounded == 0 || m_bytes_used > m_size ||
+            rounded > m_size - m_bytes_used)
+            return false;
 
-        // First-fit walk.
         uint16_t prev = kInvalid;
-        uint16_t cur  = m_head;
+        uint16_t cur = m_head;
         while (cur != kInvalid) {
             FreeNode &n = m_pool[cur];
-            // Compute aligned start within this node.
-            uint64_t start_abs = m_base + n.offset;
-            uint64_t aligned_abs = (start_abs + alignment - 1) &
-                                  ~(alignment - 1);
-            uint64_t pad = aligned_abs - start_abs;
-            if (n.length >= pad + rounded) {
-                // Carve.
-                uint64_t alloc_offset = n.offset + pad;
-                // 3 cases: exact, head-trim, tail-trim, middle-split.
+            if (!amdgpu_range_fits(m_size, n.offset, n.length)) return false;
+            if (n.offset > UINT64_MAX - m_base) return false;
+            const uint64_t start_abs = m_base + n.offset;
+            if (start_abs > UINT64_MAX - (alignment - 1ULL)) {
+                prev = cur;
+                cur = n.next;
+                continue;
+            }
+            const uint64_t aligned_abs = (start_abs + alignment - 1ULL) &
+                                         ~(alignment - 1ULL);
+            const uint64_t pad = aligned_abs - start_abs;
+            if (rounded > UINT64_MAX - pad) {
+                prev = cur;
+                cur = n.next;
+                continue;
+            }
+            const uint64_t needed = pad + rounded;
+            if (n.length >= needed) {
+                const uint64_t alloc_offset = n.offset + pad;
                 if (pad == 0 && n.length == rounded) {
-                    // Whole node consumed → unlink.
                     if (prev == kInvalid) m_head = n.next;
                     else m_pool[prev].next = n.next;
                     pool_release(cur);
                 } else if (pad == 0) {
-                    // Head-trim: shrink node from the start.
                     n.offset += rounded;
                     n.length -= rounded;
-                } else if (n.length == pad + rounded) {
-                    // Tail-trim: shrink node from the end.
+                } else if (n.length == needed) {
                     n.length = pad;
                 } else {
-                    // Middle: split — keep [n.offset, n.offset+pad) as the
-                    // existing node, insert a new node for the tail.
-                    uint16_t tail = pool_take();
-                    if (tail == kInvalid) return false;  // pool exhausted
+                    const uint16_t tail = pool_take();
+                    if (tail == kInvalid) return false;
                     m_pool[tail].offset = alloc_offset + rounded;
-                    m_pool[tail].length = n.length - pad - rounded;
-                    m_pool[tail].next   = n.next;
+                    m_pool[tail].length = n.length - needed;
+                    m_pool[tail].next = n.next;
                     n.length = pad;
-                    n.next   = tail;
+                    n.next = tail;
                 }
                 m_bytes_used += rounded;
                 m_alloc_count++;
-
-                out->gpu_va    = m_base + alloc_offset;
-                out->size      = rounded;
+                out->gpu_va = m_base + alloc_offset;
+                out->size = rounded;
                 out->alignment = alignment;
-                out->cpu_ptr   = (m_cpu_base != nullptr)
-                                    ? (m_cpu_base + alloc_offset)
-                                    : nullptr;
+                out->cpu_ptr = m_cpu_base != nullptr
+                    ? (m_cpu_base + alloc_offset) : nullptr;
                 return true;
             }
             prev = cur;
-            cur  = n.next;
+            cur = n.next;
         }
-        return false;  // OOM
+        return false;
     }
 
     // Free. Returns the bytes released to the pool, or 0 if the
     // allocation didn't match this allocator's range.
     void free(const VRAMAllocation &a) {
-        if (!m_inited || a.size == 0) return;
-        if (a.gpu_va < m_base || a.gpu_va + a.size > m_base + m_size) {
-            return;  // not ours
-        }
-        uint64_t offset = a.gpu_va - m_base;
-        uint64_t length = a.size;
-        // Insert sorted, coalescing with adjacent free ranges.
+        if (!m_inited || a.size == 0 || a.gpu_va < m_base) return;
+        const uint64_t offset = a.gpu_va - m_base;
+        const uint64_t length = a.size;
+        if (!amdgpu_range_fits(m_size, offset, length) ||
+            m_bytes_used > m_size || length > m_bytes_used)
+            return;
+
         uint16_t prev = kInvalid;
-        uint16_t cur  = m_head;
+        uint16_t cur = m_head;
         while (cur != kInvalid && m_pool[cur].offset < offset) {
             prev = cur;
-            cur  = m_pool[cur].next;
+            cur = m_pool[cur].next;
         }
-        // Try merge with prev.
+        const uint64_t end = offset + length;
+        if (prev != kInvalid) {
+            const FreeNode &n = m_pool[prev];
+            if (!amdgpu_range_fits(m_size, n.offset, n.length)) return;
+            const uint64_t prev_end = n.offset + n.length;
+            if (offset < prev_end) return; // overlap or double-free
+        }
+        if (cur != kInvalid) {
+            const FreeNode &n = m_pool[cur];
+            if (!amdgpu_range_fits(m_size, n.offset, n.length)) return;
+            if (end > n.offset) return; // overlap or double-free
+        }
+
         bool merged_prev = false;
         if (prev != kInvalid &&
             m_pool[prev].offset + m_pool[prev].length == offset) {
             m_pool[prev].length += length;
             merged_prev = true;
         }
-        // Try merge with cur.
-        if (cur != kInvalid &&
-            offset + length == m_pool[cur].offset) {
+        if (cur != kInvalid && end == m_pool[cur].offset) {
             if (merged_prev) {
-                // prev ate the freed range; now extend prev to cover cur.
                 m_pool[prev].length += m_pool[cur].length;
-                m_pool[prev].next    = m_pool[cur].next;
+                m_pool[prev].next = m_pool[cur].next;
                 pool_release(cur);
             } else {
                 m_pool[cur].offset = offset;
                 m_pool[cur].length += length;
             }
         } else if (!merged_prev) {
-            // Allocate a new node.
-            uint16_t fresh = pool_take();
-            if (fresh == kInvalid) return;  // pool full — leak the range
+            const uint16_t fresh = pool_take();
+            if (fresh == kInvalid) return;
             m_pool[fresh].offset = offset;
             m_pool[fresh].length = length;
-            m_pool[fresh].next   = cur;
+            m_pool[fresh].next = cur;
             if (prev == kInvalid) m_head = fresh;
-            else                  m_pool[prev].next = fresh;
+            else m_pool[prev].next = fresh;
         }
         m_bytes_used -= length;
         if (m_alloc_count > 0) m_alloc_count--;
