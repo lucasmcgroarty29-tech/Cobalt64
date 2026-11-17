@@ -34,9 +34,9 @@
 //      and short-lived; first-fit's O(n) scan is fine.
 //    - Coalesce on free: merge with the previous and next free node
 //      if adjacent in offset space.
-//    - Single-threaded by construction: DriverKit external-method
-//      dispatch is serialised per IOService, so a per-client allocator
-//      sees no concurrent callers.
+//    - The kext has multiple entry paths (IOUserClient methods and Apple
+//      TTL callbacks). A short internal spin lock serializes allocator
+//      metadata changes; callers must use this only from thread context.
 //
 
 #pragma once
@@ -60,10 +60,28 @@ struct VRAMAllocation {
 // clear-state, GMCContext::vram_alloc) keep linking unchanged.
 //
 class VRAMBumpAllocator {
+private:
+    mutable uint32_t m_lock { 0 };
+
+    void lock() const {
+        while (__atomic_exchange_n(&m_lock, 1U, __ATOMIC_ACQUIRE) != 0U) {
+            while (__atomic_load_n(&m_lock, __ATOMIC_RELAXED) != 0U) { }
+        }
+    }
+    void unlock() const {
+        __atomic_store_n(&m_lock, 0U, __ATOMIC_RELEASE);
+    }
+    struct ScopedLock {
+        const VRAMBumpAllocator &owner;
+        explicit ScopedLock(const VRAMBumpAllocator &a) : owner(a) { owner.lock(); }
+        ~ScopedLock() { owner.unlock(); }
+    };
+
 public:
     VRAMBumpAllocator() = default;
 
     void init(uint64_t base, uint64_t size, void *cpu_base = nullptr) {
+        ScopedLock guard(*this);
         m_inited = false;
         m_base = base;
         m_size = size;
@@ -88,17 +106,21 @@ public:
         m_inited = true;
     }
 
-    bool is_inited() const { return m_inited; }
-    uint64_t base() const { return m_base; }
-    uint64_t size() const { return m_size; }
-    uint64_t bytes_used() const { return m_bytes_used; }
-    uint64_t bytes_free() const { return m_inited ? m_size - m_bytes_used : 0; }
-    uint32_t alloc_count() const { return m_alloc_count; }
+    bool is_inited() const { ScopedLock guard(*this); return m_inited; }
+    uint64_t base() const { ScopedLock guard(*this); return m_base; }
+    uint64_t size() const { ScopedLock guard(*this); return m_size; }
+    uint64_t bytes_used() const { ScopedLock guard(*this); return m_bytes_used; }
+    uint64_t bytes_free() const {
+        ScopedLock guard(*this);
+        return m_inited && m_bytes_used <= m_size ? m_size - m_bytes_used : 0;
+    }
+    uint32_t alloc_count() const { ScopedLock guard(*this); return m_alloc_count; }
 
     // Allocate. alignment must be a power of two (we coerce up to
     // amdgpu::kASPageSize = 16 KB to keep DART happy on any future
     // re-export of these allocations).
     bool alloc(uint64_t bytes, uint64_t alignment, VRAMAllocation *out) {
+        ScopedLock guard(*this);
         if (!m_inited || bytes == 0 || out == nullptr || alignment == 0)
             return false;
         if ((alignment & (alignment - 1ULL)) != 0) return false;
@@ -169,6 +191,7 @@ public:
     // Free. Returns the bytes released to the pool, or 0 if the
     // allocation didn't match this allocator's range.
     void free(const VRAMAllocation &a) {
+        ScopedLock guard(*this);
         if (!m_inited || a.size == 0 || a.gpu_va < m_base) return;
         const uint64_t offset = a.gpu_va - m_base;
         const uint64_t length = a.size;
