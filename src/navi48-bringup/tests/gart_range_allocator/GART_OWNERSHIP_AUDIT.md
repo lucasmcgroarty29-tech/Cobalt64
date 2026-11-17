@@ -722,3 +722,8 @@ The legacy CPInit path now returns any failed ring-fetch probe result rather tha
 ## Fail-stop entry gates for follow-on diagnostics (2026-11-17)
 
 After `submission_uncertain` is set, SDMA writeback writes, ring tests, constant-fill/copy/IB-copy helpers, VRAM copy tests, sweeps and SRBM diagnostics now refuse entry before allocating or staging additional work. VMFrag similarly skips before allocating a second test table. The PM4 bring-up caller now stops immediately when the initial CP ring-fetch probe has an unconfirmed completion, rather than attempting another ring test against a potentially active queue.
+
+
+## PDB0 revert acknowledgement is now part of stage success (2026-11-17)
+
+The PDB0 self-test now returns a status to SDMAInit. If DMA completion is uncertain, it returns NotReady without changing CONTEXT0; if only staging visibility failed, it attempts a safe CONTEXT0 revert and continues only when the HDP drain and VMID-0 TLB invalidation both acknowledge. `gmc.pdb0_active` is cleared only after that TLB invalidation succeeds. A failed revert therefore stops the bring-up ladder before CP/GFX stages can use an unknown VMID-0 translation context.
