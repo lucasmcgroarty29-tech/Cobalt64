@@ -430,8 +430,8 @@ cp_alloc_storage(DeviceContext &dev, GMCContext &gmc, CPContext &cp)
 void
 cp_release_storage(CPContext &cp)
 {
-    if (cp.submission_uncertain) {
-        CP_LOG("storage release refused — CP command completion is uncertain; ring, MQD and WB backing remain quarantined");
+    if (cp.submission_uncertain || cp.kgq_mapped) {
+        CP_LOG("storage release refused — CP command completion or MES mapping is still active/uncertain; ring, MQD and WB backing remain quarantined");
         return;
     }
     // GART slots stay "used" — the GART bump allocator has no free — so the
@@ -2724,8 +2724,8 @@ void
 cp_compute_queue_release(GMCContext &gmc, ComputeQueue &cq)
 {
     (void)gmc;
-    if (cq.submission_uncertain) {
-        CP_LOG("compute queue release refused — command completion is uncertain; ring/MQD/EOP/WB backing remains quarantined");
+    if (cq.submission_uncertain || cq.mapped) {
+        CP_LOG("compute queue release refused — command completion or MES mapping is still active/uncertain; ring/MQD/EOP/WB backing remains quarantined");
         return;
     }
     sysmem_free(cq.ring_sys); sysmem_free(cq.mqd_sys);
