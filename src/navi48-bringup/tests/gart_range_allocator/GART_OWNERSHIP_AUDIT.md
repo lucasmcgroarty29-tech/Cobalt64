@@ -448,3 +448,21 @@ This remains a preflight against the CPU-visible BAR0 aperture, not a hardware
 write acknowledgement and not a GPU TLB invalidation. Mapping retirement,
 GPU-use fences, and post-publication visibility still require separate
 hardware-aware sequencing.
+
+
+## BAR0 bulk-copy alignment correction (2026-11-17)
+
+A review of the low-level BAR0 helpers found that their prefix loops advanced
+by four bytes while trying to reach an eight-byte boundary. For addresses with
+odd low alignment bits, a four-byte stride cannot reach that boundary, so
+subsequent typed 32-bit/64-bit stores could remain misaligned. The prefix now
+uses byte stores until the destination is eight-byte aligned, after which the
+existing aligned bulk stores and bounded tail remain in place. The memset
+prefix preserves the repeating four-byte pattern by selecting the correct
+pattern byte for each prefix position.
+
+The host workflow does not compile `amdgpu_regs.h` because it depends on
+IOKit. CI passing after this source change therefore confirms that the
+existing host suites remain green, not that the BAR0 helper itself has been
+compiled or exercised. Native macOS compilation and hardware validation
+remain outstanding.
