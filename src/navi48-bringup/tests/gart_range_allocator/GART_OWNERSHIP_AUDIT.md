@@ -242,14 +242,21 @@ not covered by the fast-copy lock:
   could race on `gart_bump_offset`; this is a source-level race candidate,
   not a reproduced failure.
 
-Do not add a lock just around the bump increment. Exact-offset
-`gmc_bind_at()` must participate in the same reservation protocol, and the
-lock's sleepability, callback execution context, lock order, and interaction
-with Apple-owned hooks must be established first. A future synchronization
-change needs a single shared contract for bump reservations and exact-offset
-overlap checks, plus tests for simultaneous bind requests and interval
-collision. Until then, the checked arithmetic prevents malformed ranges but
-does not make concurrent reservations safe.
+The bump allocator now reserves intervals with an atomic compare/exchange
+loop, so concurrent `gmc_bind_existing()` callers cannot receive the same
+range. Every runtime read of `gart_bump_offset` in the audited GMC and
+fast-copy paths uses an atomic load; the initial value is still set before
+runtime entry points are published. Host tests run eight threads through
+simultaneous page-aligned reservations and verify every interval is unique.
+
+Exact-offset `gmc_bind_at()` now requires HIGH mode and refuses the full
+reserved upper aperture. LOW mode is rejected because its bump allocator and
+Apple exact mappings would otherwise share one future-allocatable interval.
+This avoids pretending that checking only the current high-water mark can
+reserve an arbitrary exact-offset mapping. The remaining open questions are
+serialization of concurrent exact-offset mappings within Apple's lower
+region, and whether concurrent PTE writes/HDP flushes need additional ordering.
+This is source-level hardening, not native build or hardware validation.
 
 
 ## Shared BAR and VRAM range guards (2026-11-17)
@@ -354,3 +361,16 @@ No automatic TLB flush was added to the bind helpers. The right flush scope
 depends on which hub and VMID can cache each mapping; the current call sites
 do not encode one universal context mask. The separate bind/retire lifecycle
 model remains the place to define that contract before live PTE reclamation.
+
+
+## Atomic GMC bump reservation (2026-11-17)
+
+The runtime caller race described above has been addressed for bump
+allocations: `gmc_bind_existing()` now uses an atomic compare/exchange
+reservation primitive with page-alignment and aperture-bound checks. A failed
+page-table bounds check after reservation deliberately leaves that interval
+quarantined rather than attempting an unsafe rollback while other callers may
+already have reserved later ranges. The exact-offset path uses atomic
+high-water reads and is disabled in LOW mode; in HIGH mode it cannot overlap
+the reserved upper aperture. The host suite includes an eight-thread,
+512-reservation stress test and boundary tests for misaligned state and spans.
