@@ -156,7 +156,10 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
     uint64_t gartMCAddr = 0;
     if (!gart_checked_range(gart.gartSize, gartOff, roundedSize))
         return kIOReturnNoSpace;
-    if (!gart_checked_pte_range(gart.pageTableSize, pteStartIndex, numPTEs) ||
+    uint64_t pteBaseOffset = 0;
+    if (!gart_checked_pte_vram_range(gart.pageTableVRAMOffset,
+                                     gart.pageTableSize, pteStartIndex,
+                                     numPTEs, &pteBaseOffset) ||
         !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
         return kIOReturnBadArgument;
 
@@ -175,8 +178,8 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
         const uint64_t physAddr = m.bus + (uint64_t)i * kAMDGPUGPUPageSize;
         const uint64_t pte = (physAddr & ~((uint64_t)0xFFFULL)) |
                              PTEFlags::SYSMEM_RW;
-        const uint64_t pteOffsetInPT = (pteStartIndex + i) * 8ULL;
-        bar0_memcpy_to_vram(dev, gart.pageTableVRAMOffset + pteOffsetInPT,
+        const uint64_t pteOffsetInPT = pteBaseOffset + (uint64_t)i * 8ULL;
+        bar0_memcpy_to_vram(dev, pteOffsetInPT,
                             &pte, sizeof(pte));
     }
     amdgpu_hdp_flush(dev);
@@ -239,7 +242,10 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
 
     const uint64_t pteStartIndex = gartOff / kAMDGPUGPUPageSize;
     uint64_t gartMCAddr = 0;
-    if (!gart_checked_pte_range(gart.pageTableSize, pteStartIndex, numPTEs) ||
+    uint64_t pteBaseOffset = 0;
+    if (!gart_checked_pte_vram_range(gart.pageTableVRAMOffset,
+                                     gart.pageTableSize, pteStartIndex,
+                                     numPTEs, &pteBaseOffset) ||
         !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
         return kIOReturnBadArgument;
 
