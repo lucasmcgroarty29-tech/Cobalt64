@@ -403,9 +403,16 @@ sdma_gfx_stop_instance(const DeviceContext &dev, uint32_t instance)
     const uint32_t ib_before = ib_cntl;
     ib_cntl = REG_SET_FIELD(ib_cntl, SDMA0_SDMA_QUEUE0_IB_CNTL, IB_ENABLE, 0);
     WREG32(dev, ib_cntl_reg, ib_cntl);
-    SDMA_LOG("SDMA%u gfx_stop: RB_CNTL %#010x -> %#010x, IB_CNTL %#010x -> "
-             "%#010x", instance, rb_before, rb_cntl, ib_before, ib_cntl);
-    return kIOReturnSuccess;
+    const uint32_t rb_check = RREG32(dev, rb_cntl_reg);
+    const uint32_t ib_check = RREG32(dev, ib_cntl_reg);
+    const bool disabled =
+        REG_GET_FIELD(rb_check, SDMA0_SDMA_QUEUE0_RB_CNTL, RB_ENABLE) == 0 &&
+        REG_GET_FIELD(ib_check, SDMA0_SDMA_QUEUE0_IB_CNTL, IB_ENABLE) == 0;
+    SDMA_LOG("SDMA%u gfx_stop: RB_CNTL %#010x -> %#010x (readback %#010x), "
+             "IB_CNTL %#010x -> %#010x (readback %#010x): %s",
+             instance, rb_before, rb_cntl, rb_check, ib_before, ib_cntl, ib_check,
+             disabled ? "DISABLED" : "NOT ACKNOWLEDGED");
+    return disabled ? kIOReturnSuccess : kIOReturnNotReady;
 }
 
 //------------------------------------------------------------------
@@ -2571,6 +2578,12 @@ sdma_init_full(DeviceContext &dev,
         SDMA_LOG("init_full: GC IP base not resolved");
         return kIOReturnNotReady;
     }
+    for (uint32_t i = 0; i < kSDMAInstanceCount; i++) {
+        if (sdma.instance[i].submission_uncertain) {
+            SDMA_LOG("init_full: SDMA%u has unresolved prior DMA ownership; refusing warm reinitialisation", i);
+            return kIOReturnNotReady;
+        }
+    }
     const IPVersion gcv = dev.ip.getVersion(IPBlock::GC);
     const SDMARegOffsets &R = sdma_regs(dev);
     SDMA_LOG("init_full: starting SDMA bringup (instances=%u, "
@@ -2613,8 +2626,15 @@ sdma_init_full(DeviceContext &dev,
     for (uint32_t i = 0; i < kSDMAInstanceCount; i++) {
         sdma.instance_present[i] = sdma_instance_present(dev, i);
         if (!sdma.instance_present[i]) continue;
-        sdma_gfx_stop_instance(dev, i);
-        sdma_engine_halt(dev, i, /*halt=*/false);
+        sdma.instance[i].instance = i;
+        const kern_return_t stopResult = sdma_gfx_stop_instance(dev, i);
+        if (stopResult != kIOReturnSuccess) {
+            sdma.instance[i].submission_uncertain = true;
+            SDMA_LOG("init_full: SDMA%u queue disable was not acknowledged; backing remains quarantined", i);
+            return stopResult;
+        }
+        const kern_return_t unhaltResult = sdma_engine_halt(dev, i, /*halt=*/false);
+        if (unhaltResult != kIOReturnSuccess) return unhaltResult;
         sdma_log_status(dev, i);
     }
     if (!sdma.instance_present[0]) {
