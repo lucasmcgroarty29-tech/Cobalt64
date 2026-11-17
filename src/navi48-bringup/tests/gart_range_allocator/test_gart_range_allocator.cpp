@@ -5,7 +5,7 @@
 
 static void basic_reuse_and_coalesce() {
     GARTFreeRange slots[8]{}; GARTRangeAllocator a{}; uint64_t x, y;
-    assert(gart_range_allocator_init(&a, slots, 8, 0x10000));
+    assert(gart_range_allocator_init(&a, slots, 8, 0x10000, 0x1000));
     assert(gart_range_allocator_alloc(&a, 0x2000, 0x1000, &x) && x == 0);
     assert(gart_range_allocator_alloc(&a, 0x3000, 0x4000, &y) && y == 0x4000);
     assert(gart_range_allocator_free(&a, x, 0x2000));
@@ -15,10 +15,15 @@ static void basic_reuse_and_coalesce() {
 
 static void rejects_bad_inputs_and_double_free() {
     GARTFreeRange slots[4]{}; GARTRangeAllocator a{}; uint64_t p = 99;
-    assert(!gart_range_allocator_init(&a, slots, 4, 0));
-    assert(gart_range_allocator_init(&a, slots, 4, 0x4000));
+    assert(!gart_range_allocator_init(&a, slots, 4, 0, 0x1000));
+    assert(!gart_range_allocator_init(&a, slots, 4, 0x4001, 0x1000));
+    assert(!gart_range_allocator_init(&a, slots, 4, 0x4000, 0x1800));
+    assert(gart_range_allocator_init(&a, slots, 4, 0x4000, 0x1000));
     assert(!gart_range_allocator_alloc(&a, 0, 4096, &p));
-    assert(!gart_range_allocator_alloc(&a, 1, 3, &p));
+    assert(!gart_range_allocator_alloc(&a, 1, 4096, &p));
+    assert(!gart_range_allocator_alloc(&a, 0x1000, 0x800, &p));
+    assert(!gart_range_allocator_free(&a, 1, 0x1000));
+    assert(!gart_range_allocator_free(&a, 0, 1));
     assert(!gart_range_allocator_alloc(&a, UINT64_MAX, 4096, &p));
     assert(gart_range_allocator_alloc(&a, 0x1000, 0x1000, &p));
     assert(gart_range_allocator_free(&a, p, 0x1000));
@@ -28,7 +33,7 @@ static void rejects_bad_inputs_and_double_free() {
 
 static void capacity_failure_is_atomic() {
     GARTFreeRange slots[1]{}; GARTRangeAllocator a{}; uint64_t p;
-    assert(gart_range_allocator_init(&a, slots, 1, 0x10000));
+    assert(gart_range_allocator_init(&a, slots, 1, 0x10000, 0x1000));
     // Consume the first page, leaving a range starting at 0x1000. An aligned
     // allocation at 0x2000 would split that range and needs another descriptor.
     assert(gart_range_allocator_alloc(&a, 0x1000, 0x1000, &p) && p == 0);
@@ -52,7 +57,7 @@ static void randomized_accounting_stress() {
     GARTRangeAllocator a{};
     LiveRange live[256]{};
     uint32_t rng = 0x91e10da5u;
-    assert(gart_range_allocator_init(&a, slots, 512, aperture));
+    assert(gart_range_allocator_init(&a, slots, 512, aperture, page));
 
     for (unsigned step = 0; step < 50000; ++step) {
         const unsigned index = next_random(&rng) % 256u;
