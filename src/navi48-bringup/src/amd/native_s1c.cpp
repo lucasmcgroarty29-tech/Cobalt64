@@ -393,6 +393,13 @@ static uint32_t ring_put_locked(const uint32_t *dw, uint32_t n, uint64_t seq, ui
     const uint64_t startWc = gWc;
     uint64_t wc = gWc;
     for (uint32_t i = 0; i < n; i++) { ring[ring_idx(wc, mask)] = dw[i]; wc++; }
+    // Do not publish the software/hardware write pointer until the staged ring
+    // contents have passed the checked HDP flush. On failure, gWc remains at
+    // startWc and a later submission may safely overwrite these uncommitted dwords.
+    if (!amdgpu_hdp_flush(dev)) {
+        N1C_LOG("ring submit refused: HDP flush window unavailable; packet was not published or doorbelled");
+        return kNotReady;
+    }
     gWc = wc;
     cp.wptr = ring_idx(wc, mask);
     // The clock for rule 6.3(b) starts at the kick that makes an idle ring busy; emitted goes up BEFORE the doorbell so retired can never
@@ -405,7 +412,6 @@ static uint32_t ring_put_locked(const uint32_t *dw, uint32_t n, uint64_t seq, ui
     n48native::g2::owner_note(gOwners, seq, ownerSlot, ownerId, startWc);
     if (owner != nullptr) __atomic_store_n(&owner->emitted, seq, __ATOMIC_RELEASE);
     __atomic_store_n(&gEmitted, seq, __ATOMIC_RELEASE);
-    amdgpu_hdp_flush(dev);
     const uint64_t wptr64 = wc;   // the FULL 64-bit counter, never masked
     *reinterpret_cast<volatile uint64_t *>(static_cast<uint8_t *>(cp.wb_cpu) + kCPWBOffsetWptr) = wptr64;
     sysmem_wmb();
