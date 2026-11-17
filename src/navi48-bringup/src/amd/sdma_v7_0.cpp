@@ -113,7 +113,8 @@ bool
 sdma_wb_write32(const DeviceContext &dev, const SDMAInstance &inst,
                 uint32_t byte_offset, uint32_t value)
 {
-    if (!amdgpu_range_fits(kSDMAWBPageBytes, byte_offset, 4)) return false;
+    if (!inst.inited || inst.submission_uncertain ||
+        !amdgpu_range_fits(kSDMAWBPageBytes, byte_offset, 4)) return false;
     if (inst.wb_in_vram) {
         // Stage only. The queue-publication path performs one checked HDP
         // flush after all shadow dwords have been written.
@@ -1372,8 +1373,8 @@ sdma_srbm_selftest(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
     SDMASRBMTestResult t {};
     if (out) *out = t;
 
-    if (!inst.inited || !inst.enabled) {
-        SDMA_LOG("srbm-test: SDMA%u QUEUE0 is not running — skipping",
+    if (!inst.inited || !inst.enabled || inst.submission_uncertain) {
+        SDMA_LOG("srbm-test: SDMA%u is not in a known-good submission state — skipping",
                  inst.instance);
         return kIOReturnNotReady;
     }
@@ -1609,7 +1610,7 @@ kern_return_t
 sdma_ring_test(const DeviceContext &dev, SDMAInstance &inst,
                uint64_t timeout_us)
 {
-    if (!inst.inited || !inst.enabled) return kIOReturnNotReady;
+    if (!inst.inited || !inst.enabled || inst.submission_uncertain) return kIOReturnNotReady;
 
     // Use an unused part of the WB page (offset 0x80) as the fence
     // landing slot. Pre-clear it.
@@ -1687,7 +1688,7 @@ sdma_const_fill_test(const DeviceContext &dev, SDMAInstance &inst,
                      uint64_t dst, uint32_t pattern,
                      uint32_t byte_count, uint64_t timeout_us)
 {
-    if (!inst.inited || !inst.enabled) return kIOReturnNotReady;
+    if (!inst.inited || !inst.enabled || inst.submission_uncertain) return kIOReturnNotReady;
     if (byte_count == 0 || (byte_count & 3u) != 0 ||
         byte_count > kSDMACopyLinearMaxBytes) {
         return kIOReturnBadArgument;
@@ -1744,7 +1745,7 @@ sdma_copy_linear_test(const DeviceContext &dev, SDMAInstance &inst,
                       uint64_t src_bus, uint64_t dst_bus,
                       uint32_t byte_count, uint64_t timeout_us, bool cpv)
 {
-    if (!inst.inited || !inst.enabled) return kIOReturnNotReady;
+    if (!inst.inited || !inst.enabled || inst.submission_uncertain) return kIOReturnNotReady;
     if (byte_count == 0 || byte_count > kSDMACopyLinearMaxBytes) {
         return kIOReturnBadArgument;
     }
@@ -1832,7 +1833,7 @@ sdma_ib_copy_linear_test(const DeviceContext &dev, SDMAInstance &inst,
                          uint64_t src, uint64_t dst, uint32_t byte_count,
                          uint32_t vmid, uint32_t tag, uint64_t timeout_us)
 {
-    if (!inst.inited || !inst.enabled) return kIOReturnNotReady;
+    if (!inst.inited || !inst.enabled || inst.submission_uncertain) return kIOReturnNotReady;
     if (byte_count == 0 || byte_count > kSDMACopyLinearMaxBytes)
         return kIOReturnBadArgument;
     if (vmid > 15) return kIOReturnBadArgument;
@@ -2051,9 +2052,10 @@ sdma_vram_copy_test(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst,
                  "hasn't run)");
         return kIOReturnNotReady;
     }
-    if (!inst.inited || !inst.enabled) {
-        SDMA_LOG("vram_copy_test: SDMA%u not ready (inited=%d enabled=%d)",
-                 inst.instance, (int)inst.inited, (int)inst.enabled);
+    if (!inst.inited || !inst.enabled || inst.submission_uncertain) {
+        SDMA_LOG("vram_copy_test: SDMA%u not ready (inited=%d enabled=%d uncertain=%d)",
+                 inst.instance, (int)inst.inited, (int)inst.enabled,
+                 (int)inst.submission_uncertain);
         return kIOReturnNotReady;
     }
 
@@ -2224,10 +2226,11 @@ struct SweepCase {
 kern_return_t
 sdma_vram_copy_sweep(DeviceContext &dev, GMCContext &gmc, SDMAInstance &inst)
 {
-    if (!gmc.vram_alloc.is_inited() || !inst.inited || !inst.enabled) {
-        SDMA_LOG("copy_sweep: NOT RUN (vram_alloc %d, SDMA%u inited %d enabled %d)",
+    if (!gmc.vram_alloc.is_inited() || !inst.inited || !inst.enabled || inst.submission_uncertain) {
+        SDMA_LOG("copy_sweep: NOT RUN (vram_alloc %d, SDMA%u inited %d enabled %d uncertain %d)",
                  (int)gmc.vram_alloc.is_inited(), inst.instance,
-                 (int)inst.inited, (int)inst.enabled);
+                 (int)inst.inited, (int)inst.enabled,
+                 (int)inst.submission_uncertain);
         return kIOReturnNotReady;
     }
 
