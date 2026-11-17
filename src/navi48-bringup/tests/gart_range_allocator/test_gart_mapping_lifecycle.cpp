@@ -30,7 +30,7 @@ static void normal_lifecycle_requires_each_context() {
     assert(gart_lifecycle_retire_complete(&l));
     assert(l.state == GART_MAPPING_REUSABLE);
     assert(gart_lifecycle_pte_written(&l));
-    assert(l.invalidated_hub_mask == 0);
+    assert(l.invalidated_context_mask == 0);
     assert(gart_lifecycle_valid(&l));
 }
 
