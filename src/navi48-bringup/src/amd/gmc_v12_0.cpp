@@ -1976,7 +1976,9 @@ static uint32_t gBindAtCalls = 0;
 // certifies. One refusal is enough to retire "only this kext writes that page" as an observation, so E1 requires ZERO.
 // hp1 and hp2 both logged 0 refusals against 12 `bind_at #` lines. Latched per boot; never cleared.
 static uint64_t gBindAtOverlapRefusals = 0;
-uint64_t gmc_bind_at_overlap_refusals(void) { return gBindAtOverlapRefusals; }
+uint64_t gmc_bind_at_overlap_refusals(void) {
+    return __atomic_load_n(&gBindAtOverlapRefusals, __ATOMIC_ACQUIRE);
+}
 
 kern_return_t
 gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
@@ -2025,7 +2027,7 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
                 (unsigned long long)endOffset,
                 (unsigned long long)gmc.gart_bump_start,
                 (unsigned long long)reservedEnd);
-        gBindAtOverlapRefusals++;
+        __atomic_add_fetch(&gBindAtOverlapRefusals, 1ULL, __ATOMIC_RELAXED);
         return kIOReturnBusy;
     }
 
@@ -2055,11 +2057,11 @@ gmc_bind_at(DeviceContext &dev, GMCContext &gmc, uint64_t gartOffset,
         return kIOReturnNotReady;
     }
 
-    gBindAtCalls++;
-    if (gBindAtCalls <= 8 || (gBindAtCalls % 512) == 0)
+    const uint32_t bindAtCall = __atomic_add_fetch(&gBindAtCalls, 1u, __ATOMIC_RELAXED);
+    if (bindAtCall <= 8 || (bindAtCall % 512) == 0)
         GMC_LOG("bind_at #%u: %llu bytes bus=%#llx -> mc=%#llx (gart_off=%#llx, %u PTEs "
                 "from PT idx %llu)",
-                (unsigned)gBindAtCalls,
+                (unsigned)bindAtCall,
                 (unsigned long long)rounded, (unsigned long long)busAddr,
                 (unsigned long long)mcAddr,
                 (unsigned long long)gartOffset, (unsigned)numPTEs,
