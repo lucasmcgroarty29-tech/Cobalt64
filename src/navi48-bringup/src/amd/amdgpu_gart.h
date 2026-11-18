@@ -124,9 +124,11 @@ void gart_unbind(GARTContext &gart, GARTBinding *binding);
 // PTEs stay live until the GART is reset (GMC re-zeroes the page table)
 // or the binding is overwritten by another bind at the same offset.
 //
-// Idempotent across re-binds of the same buffer: pass the previous
-// binding back in to reuse its `gartOffset` (avoids bumping the
-// allocator); pass a zero-init binding to allocate a fresh slot.
+// Reuse is allowed only when bus address, rounded size, page count and
+// computed MC slot all match exactly. Different backing or extent is rejected;
+// use a separate zero-initialised binding for a fresh slot. After a failed HDP
+// flush, slot metadata remains with bind_acknowledged=false, so only the same
+// mapping can be retried.
 //
 kern_return_t gart_bind_existing(DeviceContext &dev, GARTContext &gart,
                                  uint64_t busAddr, uint64_t sizeBytes,
