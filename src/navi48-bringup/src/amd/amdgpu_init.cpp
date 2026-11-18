@@ -884,9 +884,18 @@ void bringup_teardown(BringupContext &ctx) {
     //     have no dependency on the CP), then the CP front-ends and the MEC.
     if (dev.ip.isResolved(IPBlock::GC)) {
         for (uint32_t i = 0; i < kSDMAInstanceCount; i++) {
-            if (!ctx.sdma.instance[i].inited) continue;
-            sdma_gfx_stop_instance(dev, i);
-            sdma_engine_halt(dev, i, true);
+            SDMAInstance &inst = ctx.sdma.instance[i];
+            if (!inst.inited) continue;
+            const kern_return_t queueStop = sdma_gfx_stop_instance(dev, i);
+            const kern_return_t engineHalt = sdma_engine_halt(dev, i, true);
+            if (queueStop == kIOReturnSuccess && engineHalt == kIOReturnSuccess) {
+                inst.enabled = false;
+                INIT_LOG("teardown: SDMA%u queue and engine disable acknowledged", i);
+            } else {
+                inst.submission_uncertain = true;
+                INIT_LOG("teardown: SDMA%u stop not acknowledged (queue=%#x engine=%#x); backing retained",
+                         i, queueStop, engineHalt);
+            }
         }
         if (ctx.cp.inited || ctx.reached >= BringupStage::CPInit) {
             cp_enable(dev, false);
