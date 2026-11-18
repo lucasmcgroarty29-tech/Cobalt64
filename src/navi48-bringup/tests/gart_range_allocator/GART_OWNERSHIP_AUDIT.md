@@ -732,3 +732,34 @@ The PDB0 self-test now returns a status to SDMAInit. If DMA completion is uncert
 ## MES REMOVE_QUEUE acknowledgement controls CP ownership (2026-11-17)
 
 The takeover and native hang-recovery paths now clear `kgq_mapped` only after MES acknowledges REMOVE_QUEUE. If the acknowledgement is missing, the mapping remains marked live and `CPContext::submission_uncertain` is set, preventing another MQD rewrite, ADD_QUEUE or ring submission and preventing CP storage release. This closes the teardown side of the MES queue lifetime contract.
+
+
+## Fail-closed teardown mitigation (2026-11-18)
+
+The active teardown path now has conservative guards against releasing GART-backed
+storage while either MMHUB or GFXHUB still reports its GART context enabled:
+
+- `bringup_teardown` clears the GFX/compute queue-mapped flags only after
+  `mes_remove_hw_queue` succeeds. A missing acknowledgement marks the relevant
+  CP/compute queue uncertain and preserves its mapped state, so the existing release
+  guards keep its backing allocations.
+- `cp_release_storage`, `cp_compute_queue_release`, `mes_release_storage` and
+  `sdma_release_storage` now refuse to release backing while either GART hub remains
+  enabled. `gmc_release_resources` likewise retains the page-table, dummy-page and
+  scratch backing while either hub remains enabled.
+- CP, MES and SDMA allocation helpers retain their `SysMem` owner handle after a
+  failed `gmc_bind_existing` result, because the helper may have written PTEs before
+  an HDP flush failure. Their retry paths refuse to treat retained partial state as a
+  successfully mapped allocation. SDMA teardown also releases a retained failed-bind
+  page after the GART hubs are eventually retired, even if the instance used its VRAM
+  fallback.
+- The separate, dormant `GARTContext` `gart_unbind` path no longer frees its owned
+  `SysMem` while leaving a valid PTE behind; it quarantines the backing and slot.
+
+This is a **safety mitigation, not completed reclamation**. The driver still lacks an
+acknowledged MMHUB/GFXHUB GART-disable and translation-retirement sequence. The free-range
+allocator remains unintegrated; no GART slot is returned for reuse. A complete solution
+must stop all users, disable/retire the relevant contexts, clear PTEs, drain HDP, confirm
+TLB invalidation for every relevant hub/VMID, and only then release the backing and slot.
+Until then, normal teardown may intentionally retain allocations. No macOS kext build or
+physical RX 9070 XT validation has been performed for these changes.
