@@ -763,6 +763,10 @@ storage while either MMHUB or GFXHUB still reports its GART context enabled:
   the only software owner handle when the self-test returns after a bind/DMA failure.
 - The separate, dormant `GARTContext` `gart_unbind` path no longer frees its owned
   `SysMem` while leaving a valid PTE behind; it quarantines the backing and slot.
+  `gart_bind_sysmem` now publishes the allocated `SysMem` owner and reserved GART
+  slot into the caller's zero-initialised binding before writing PTEs. If the later
+  HDP flush fails, the caller retains the only owner handle and can keep it quarantined;
+  a retry cannot overwrite an existing binding.
 
 The host-side lifecycle model now also records independently confirmed in-flight
 completions after a mapping has entered quarantine. The state remains terminally
