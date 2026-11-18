@@ -35,8 +35,14 @@ bool gart_lifecycle_begin_use(GARTMappingLifecycle *l) {
 bool gart_lifecycle_end_use(GARTMappingLifecycle *l) {
     if (!l || l->in_flight == 0 ||
         (l->state != GART_MAPPING_IN_FLIGHT &&
-         l->state != GART_MAPPING_RETIRING)) return false;
+         l->state != GART_MAPPING_RETIRING &&
+         l->state != GART_MAPPING_QUARANTINED)) return false;
     --l->in_flight;
+    if (l->state == GART_MAPPING_QUARANTINED) {
+        // A separately confirmed completion may update accounting, but
+        // quarantine is terminal: it never becomes reusable through this path.
+        return true;
+    }
     if (l->in_flight == 0) {
         l->state = (l->state == GART_MAPPING_RETIRING)
             ? GART_MAPPING_QUIESCENT : GART_MAPPING_MAPPED;
