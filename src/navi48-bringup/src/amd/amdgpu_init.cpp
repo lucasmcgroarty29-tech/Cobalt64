@@ -141,6 +141,10 @@ static kern_return_t run_pdb0_selftest(BringupContext &ctx) {
         INIT_LOG("pdb0 selftest: SDMA0 completion is uncertain; stopping before later bring-up stages");
         return kIOReturnNotReady;
     }
+    if (ctx.pdb0TestPage.valid()) {
+        INIT_LOG("pdb0 selftest: a prior GART test page is still owned/quarantined; refusing to allocate or bind another page");
+        return kIOReturnNotReady;
+    }
     t.ran = true;
     constexpr uint32_t kBytes = 4096;
     constexpr uint32_t kDwords = kBytes / 4;
@@ -242,7 +246,7 @@ static kern_return_t run_pdb0_selftest(BringupContext &ctx) {
 
     // ---- (c) GART round-trip through PDE[66].
     {
-        SysMem page {};
+        SysMem &page = ctx.pdb0TestPage;
         kern_return_t ar = sysmem_alloc(page, kAMDGPUGPUPageSize, kAMDGPUGPUPageSize);
         uint64_t mc = 0;
         if (ar == kIOReturnSuccess)
