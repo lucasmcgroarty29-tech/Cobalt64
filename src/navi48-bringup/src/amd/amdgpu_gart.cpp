@@ -305,21 +305,32 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
 }
 
 //============================================================
-// gart_unbind — release the buffer this binding owns.
-// (Bump allocator: the GART slot stays "used" until the table is
-// re-zeroed by gmc_alloc_resources.)
+// gart_unbind — conservative retirement until PTE + TLB invalidation
+// is wired into this API.
+//
+// The old implementation freed SysMem while leaving its PTEs valid.
+// A GPU with a cached translation could then access memory after the
+// host allocator had reused it. The bump allocator also never reclaimed
+// the GART slot, so freeing the backing provided no useful space benefit.
+//
+// Do NOT free or clear the binding here. Retaining both the backing and
+// slot is an intentional fail-closed quarantine. A future reclaim path
+// must first stop new submissions, prove all users are idle, clear every
+// PTE, drain HDP, invalidate every relevant hub/VMID TLB, and only then
+// free SysMem and return the slot to an allocator. This void API cannot
+// establish those conditions, so it must not pretend that unbind is safe.
 //============================================================
 void
 gart_unbind(GARTContext &gart, GARTBinding *binding)
 {
     (void)gart;
     if (binding == nullptr || !binding->sysmem.valid()) return;
-    sysmem_free(binding->sysmem);
-    binding->busAddr = 0;
-    binding->cpuAddr = nullptr;
-    // PTE invalidation is handled by the full-table memset in
-    // gmc_alloc_resources; the bump allocator means a single unbind
-    // doesn't free the slot.
+
+    GART_LOG("unbind: quarantining %llu-byte sysmem backing at bus=%#llx "
+             "gart_mc=%#llx; PTE/TLB retirement is not yet implemented",
+             (unsigned long long)binding->sizeBytes,
+             (unsigned long long)binding->busAddr,
+             (unsigned long long)binding->gartMCAddr);
 }
 
 } // namespace amdgpu
