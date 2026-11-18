@@ -127,6 +127,26 @@ static void test_atomic_bump_reservations(void)
     assert(!gart_atomic_bump_reserve(&next, kTotal, kSpan, &next));
 }
 
+static void test_exact_binding_reuse_contract(void)
+{
+    // Reuse is valid only for the exact same bus range and exact same slot.
+    assert(gart_binding_reuse_exact(0x840010000ULL, 0x12345000ULL, 0x4000, 4,
+                                    0x840010000ULL, 0x12345000ULL, 0x4000, 4));
+    // Shrinking or growing the extent must allocate a new slot: otherwise
+    // stale tail PTEs or an incomplete replacement could remain reachable.
+    assert(!gart_binding_reuse_exact(0x840010000ULL, 0x12345000ULL, 0x8000, 8,
+                                     0x840010000ULL, 0x12345000ULL, 0x4000, 4));
+    assert(!gart_binding_reuse_exact(0x840010000ULL, 0x12345000ULL, 0x4000, 4,
+                                     0x840010000ULL, 0x12345000ULL, 0x8000, 8));
+    // A changed physical backing or changed GART slot is not the same mapping.
+    assert(!gart_binding_reuse_exact(0x840010000ULL, 0x12345000ULL, 0x4000, 4,
+                                     0x840010000ULL, 0x12346000ULL, 0x4000, 4));
+    assert(!gart_binding_reuse_exact(0x840010000ULL, 0x12345000ULL, 0x4000, 4,
+                                     0x840020000ULL, 0x12345000ULL, 0x4000, 4));
+    assert(!gart_binding_reuse_exact(0, 0x12345000ULL, 0x4000, 4,
+                                     0, 0x12345000ULL, 0x4000, 4));
+}
+
 static void test_bus_and_add_overflow(void)
 {
     uint64_t value = 0;
@@ -153,7 +173,8 @@ int main(void)
     test_checked_geometry_arithmetic();
     test_ranges_and_pte_bounds();
     test_atomic_bump_reservations();
+    test_exact_binding_reuse_contract();
     test_bus_and_add_overflow();
-    puts("GART checked bounds: 5 test groups passed");
+    puts("GART checked bounds: 6 test groups passed");
     return 0;
 }
