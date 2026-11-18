@@ -197,6 +197,7 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
     outBinding->gartOffset  = gartOff;
     outBinding->gartMCAddr  = gartMCAddr;
     outBinding->numGPUPages = numPTEs;
+    outBinding->bind_acknowledged = false;
 
     for (uint32_t i = 0; i < numPTEs; i++) {
         const uint64_t physAddr = m.bus + (uint64_t)i * kAMDGPUGPUPageSize;
@@ -216,6 +217,7 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
         return kIOReturnNotReady;
     }
 
+    outBinding->bind_acknowledged = true;
     gart.nextFreeOffset = gartOff + roundedSize;
 
     GART_LOG("bind: %llu bytes @ bus=%#llx -> gart_mc=%#llx "
