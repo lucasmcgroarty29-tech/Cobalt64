@@ -135,8 +135,8 @@ gart_init(DeviceContext &dev, const GMCContext &gmc, GARTContext &gart)
 //
 // Limitations:
 //   - Single contiguous segment only (sysmem_alloc guarantees one).
-//   - Bump allocator: no free path until gart_unbind is called, and
-//     even then the slot stays reserved.
+//   - Bump allocator: no slot reclamation. gart_unbind quarantines owned
+//     backing until PTE clearing and both-hub TLB retirement are implemented.
 //============================================================
 kern_return_t
 gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
