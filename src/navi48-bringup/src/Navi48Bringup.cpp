@@ -1750,8 +1750,14 @@ bool navi48_gfx_remove_queue(uint32_t doorbellIndex, int32_t &krOut) {
 		*gBringup.dev, gBringup.mes, amdgpu::kMESQueueType_GFX,
 		/*pipe_id=*/0, /*queue_id=*/0, doorbellIndex);
 	krOut = (int32_t)r;
-	gBringup.kgqMapped   = false;
-	gBringup.cp.kgq_mapped = false;
+	if (r == kIOReturnSuccess) {
+		gBringup.kgqMapped = false;
+		gBringup.cp.kgq_mapped = false;
+	} else {
+		// MES may have applied REMOVE_QUEUE without returning its acknowledgement.
+		// Keep the mapping marked live and block all further CP submissions.
+		gBringup.cp.submission_uncertain = true;
+	}
 	N48LOG("gfx-remove: MES REMOVE_QUEUE(GFX pipe0 queue0 doorbell=%u) %s (%#x)",
 	       doorbellIndex, r == kIOReturnSuccess ? "ACKED" : "NOT acked", r);
 	return r == kIOReturnSuccess;
@@ -1766,7 +1772,8 @@ bool navi48_gfx_takeover(Navi48GfxTakeover &t) {
 		N48LOG("gfx-takeover: no device, or the GFXHUB GART is not up - REFUSING");
 		return false;
 	}
-	if (!gBringup.cp.inited || !gBringup.cp.mqd_cpu || gBringup.cp.mqd_bus == 0) {
+	if (!gBringup.cp.inited || gBringup.cp.submission_uncertain ||
+	    !gBringup.cp.mqd_cpu || gBringup.cp.mqd_bus == 0) {
 		N48LOG("gfx-takeover: the CP has no MQD buffer - REFUSING");
 		return false;
 	}

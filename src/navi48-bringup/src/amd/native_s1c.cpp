@@ -2288,7 +2288,10 @@ struct G1Env {
             const uint32_t fl = kRemoveQueueFlag_unmap_legacy_queue | (after ? kRemoveQueueFlag_remove_after_reset : 0u);
             kern_return_t r = mes_remove_hw_queue_flags(dev, mes, kMESQueueType_GFX, 0u, 0u, cp.doorbell_index, fl);
             N1C_LOG("g1 hangrecover remap: MES REMOVE_QUEUE(GFX pipe 0 queue 0, flags %#x) %s (%#x)", fl, r == kIOReturnSuccess ? "ACKED" : "NOT acked", r);
-            if (r != kIOReturnSuccess) return (uint32_t)r;    // the queue's state is unknown: no re-init, no ADD_QUEUE
+            if (r != kIOReturnSuccess) {
+                cp.submission_uncertain = true;
+                return (uint32_t)r;    // the queue's state is unknown: no re-init, no ADD_QUEUE
+            }
             cp.kgq_mapped = false; gCtx->kgqMapped = false;
             // amdgpu_gfx_mqd_reset_restore: ring->wptr = 0, *wptr_cpu_addr = 0, amdgpu_ring_clear_ring (the whole ring to NOP).
             IOLockLock(gCliLock);
