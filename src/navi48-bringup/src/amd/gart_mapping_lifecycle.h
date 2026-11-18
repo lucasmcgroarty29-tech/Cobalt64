@@ -41,6 +41,8 @@ void gart_lifecycle_init(GARTMappingLifecycle *lifecycle,
 bool gart_lifecycle_pte_written(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_mapping_visible(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_begin_use(GARTMappingLifecycle *lifecycle);
+/* Records a confirmed completion. In QUARANTINED state this only decrements
+ * in_flight; it never changes the terminal state or makes the mapping reusable. */
 bool gart_lifecycle_end_use(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_begin_retire(GARTMappingLifecycle *lifecycle);
 bool gart_lifecycle_ptes_cleared(GARTMappingLifecycle *lifecycle);
