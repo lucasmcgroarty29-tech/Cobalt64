@@ -727,3 +727,8 @@ After `submission_uncertain` is set, SDMA writeback writes, ring tests, constant
 ## PDB0 revert acknowledgement is now part of stage success (2026-11-17)
 
 The PDB0 self-test now returns a status to SDMAInit. If DMA completion is uncertain, it returns NotReady without changing CONTEXT0; if only staging visibility failed, it attempts a safe CONTEXT0 revert and continues only when the HDP drain and VMID-0 TLB invalidation both acknowledge. `gmc.pdb0_active` is cleared only after that TLB invalidation succeeds. A failed revert therefore stops the bring-up ladder before CP/GFX stages can use an unknown VMID-0 translation context.
+
+
+## MES REMOVE_QUEUE acknowledgement controls CP ownership (2026-11-17)
+
+The takeover and native hang-recovery paths now clear `kgq_mapped` only after MES acknowledges REMOVE_QUEUE. If the acknowledgement is missing, the mapping remains marked live and `CPContext::submission_uncertain` is set, preventing another MQD rewrite, ADD_QUEUE or ring submission and preventing CP storage release. This closes the teardown side of the MES queue lifetime contract.
