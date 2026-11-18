@@ -2120,14 +2120,21 @@ cp_compute_enable(const DeviceContext &dev, bool enable)
 
     // gfx_v12_0.c:2807 — short settling delay so MEC sees the
     // write before any queue programming follows. Upstream: udelay(50).
-    // The reference had to round this up to IOSleep(1) (DriverKit has no
-    // IODelay); the kernel does, so this is upstream-exact.
     IODelay(50);
 
-    CP_LOG("CP_MEC_RS64_CNTL %s: value=%#010x (readback=%#010x)",
+    const uint32_t readback = RREG32(dev, r);
+    const uint32_t expectedActive = enable ? 1u : 0u;
+    const uint32_t expectedHalt = enable ? 0u : 1u;
+    const bool acknowledged =
+        REG_GET_FIELD(readback, CP_MEC_RS64_CNTL, MEC_HALT) == expectedHalt &&
+        REG_GET_FIELD(readback, CP_MEC_RS64_CNTL, MEC_PIPE0_ACTIVE) == expectedActive &&
+        REG_GET_FIELD(readback, CP_MEC_RS64_CNTL, MEC_PIPE1_ACTIVE) == expectedActive &&
+        REG_GET_FIELD(readback, CP_MEC_RS64_CNTL, MEC_PIPE2_ACTIVE) == expectedActive &&
+        REG_GET_FIELD(readback, CP_MEC_RS64_CNTL, MEC_PIPE3_ACTIVE) == expectedActive;
+    CP_LOG("CP_MEC_RS64_CNTL %s: value=%#010x (readback=%#010x, %s)",
            enable ? "enabled (MEC running)" : "disabled (MEC halted)",
-           data, RREG32(dev, r));
-    return kIOReturnSuccess;
+           data, readback, acknowledged ? "ACKNOWLEDGED" : "NOT ACKNOWLEDGED");
+    return acknowledged ? kIOReturnSuccess : kIOReturnNotReady;
 }
 
 // ----- cp_set_doorbell_range: program GFX + MEC doorbell windows -----
@@ -2220,20 +2227,27 @@ cp_enable(const DeviceContext &dev, bool enable)
             waited_us++;
             stat = RREG32(dev, stat_reg);
         }
-        if (stat != 0)
+        if (stat != 0) {
             CP_LOG("cp_enable(%s): CP_STAT did not reach 0 within %u us "
-                   "(CP_STAT=%#010x) — upstream logs this and continues",
-                   enable ? "unhalt" : "halt", waited_us, stat);
-        else
+                   "(CP_STAT=%#010x)", enable ? "unhalt" : "halt", waited_us, stat);
+            if (!enable) return kIOReturnTimeout;
+        } else {
             CP_LOG("cp_enable(%s): CP_STAT reached 0 after %u us",
                    enable ? "unhalt" : "halt", waited_us);
+        }
     }
 
+    const uint32_t readback = RREG32(dev, r);
+    const uint32_t expectedHalt = enable ? 0u : 1u;
+    const bool acknowledged =
+        REG_GET_FIELD(readback, CP_ME_CNTL, ME_HALT) == expectedHalt &&
+        REG_GET_FIELD(readback, CP_ME_CNTL, PFP_HALT) == expectedHalt;
     CP_LOG("CP_ME_CNTL %s (ME_HALT=%u PFP_HALT=%u, value=%#010x, "
-           "readback=%#010x)",
+           "readback=%#010x, %s)",
            enable ? "running" : "halted",
-           enable ? 0u : 1u, enable ? 0u : 1u, tmp, RREG32(dev, r));
-    return kIOReturnSuccess;
+           enable ? 0u : 1u, enable ? 0u : 1u, tmp, readback,
+           acknowledged ? "ACKNOWLEDGED" : "NOT ACKNOWLEDGED");
+    return acknowledged ? kIOReturnSuccess : kIOReturnNotReady;
 }
 
 // ----- cp_kick_doorbell: write wptr to the BAR2 doorbell slot -----
@@ -2555,8 +2569,16 @@ cp_init_full(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
     // PFP/ME/MEC halted and gfx_v12_0_cp_gfx_load_microcode's explicit
     // cp_gfx_enable(false) is on the DIRECT path only, gfx_v12_0.c:2682).
     // Halting explicitly is a superset and makes the log unambiguous.
-    cp_enable(dev, false);
-    cp_compute_enable(dev, false);
+    r = cp_enable(dev, false);
+    if (r != kIOReturnSuccess) {
+        CP_LOG("cp_init_full: PFP/ME halt not acknowledged: %#x", r);
+        return r;
+    }
+    r = cp_compute_enable(dev, false);
+    if (r != kIOReturnSuccess) {
+        CP_LOG("cp_init_full: MEC halt not acknowledged: %#x", r);
+        return r;
+    }
 
     // (2) RS64 instruction/data cache bases. Not in upstream's PSP path —
     // upstream assumes the PSP set them. On this card it does not, and
