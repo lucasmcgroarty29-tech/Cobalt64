@@ -147,7 +147,7 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
     if (outBinding->sysmem.md != nullptr || outBinding->busAddr != 0 ||
         outBinding->cpuAddr != nullptr || outBinding->sizeBytes != 0 ||
         outBinding->gartOffset != 0 || outBinding->gartMCAddr != 0 ||
-        outBinding->numGPUPages != 0)
+        outBinding->numGPUPages != 0 || outBinding->bind_acknowledged)
         return kIOReturnBusy; // never overwrite an owner handle or live slot
     if (gart.numPTEs == 0) {
         GART_LOG("bind: GART not initialised");
@@ -168,8 +168,7 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
     if (!gart_checked_pte_vram_range(gart.pageTableVRAMOffset,
                                      gart.pageTableSize, pteStartIndex,
                                      numPTEs, &pteBaseOffset) ||
-        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr) ||
-        (reuse && binding->gartMCAddr != gartMCAddr))
+        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
         return kIOReturnBadArgument;
 
     const uint64_t pteBytes = (uint64_t)numPTEs * sizeof(uint64_t);
@@ -264,7 +263,8 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
     if (binding->sysmem.md != nullptr) return kIOReturnBusy;
     const bool has_metadata = binding->busAddr != 0 || binding->cpuAddr != nullptr ||
         binding->sizeBytes != 0 || binding->gartOffset != 0 ||
-        binding->gartMCAddr != 0 || binding->numGPUPages != 0;
+        binding->gartMCAddr != 0 || binding->numGPUPages != 0 ||
+        binding->bind_acknowledged;
     const bool reuse = has_metadata;
     if (reuse && (binding->gartMCAddr == 0 || binding->busAddr != busAddr ||
                   binding->sizeBytes != rounded || binding->numGPUPages != numPTEs))
@@ -280,7 +280,8 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
     if (!gart_checked_pte_vram_range(gart.pageTableVRAMOffset,
                                      gart.pageTableSize, pteStartIndex,
                                      numPTEs, &pteBaseOffset) ||
-        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
+        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr) ||
+        (reuse && binding->gartMCAddr != gartMCAddr))
         return kIOReturnBadArgument;
 
     const uint64_t pteBytes = (uint64_t)numPTEs * sizeof(uint64_t);
