@@ -900,8 +900,15 @@ void bringup_teardown(BringupContext &ctx) {
             }
         }
         if (ctx.cp.inited || ctx.reached >= BringupStage::CPInit) {
-            cp_enable(dev, false);
-            cp_compute_enable(dev, false);
+            const kern_return_t cpHalt = cp_enable(dev, false);
+            const kern_return_t mecHalt = cp_compute_enable(dev, false);
+            if (cpHalt != kIOReturnSuccess || mecHalt != kIOReturnSuccess) {
+                ctx.cp.submission_uncertain = true;
+                INIT_LOG("teardown: CP/MEC halt not acknowledged (CP=%#x MEC=%#x); CP backing retained",
+                         cpHalt, mecHalt);
+            } else {
+                INIT_LOG("teardown: CP PFP/ME and MEC halt acknowledged");
+            }
         }
         // (3) Park the scheduler last: REMOVE_QUEUE above needed it running.
         if (ctx.mes.pipe[0].enabled) {
