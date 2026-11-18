@@ -757,6 +757,10 @@ storage while either MMHUB or GFXHUB still reports its GART context enabled:
   now refuse to reallocate or rebind a retained page after an unconfirmed bind. The
   GMC resource allocator also refuses to report success for a partially-created
   dummy-page/scratch pair.
+- The PDB0 GART round-trip self-test now stores its SysMem page in `BringupContext`,
+  refuses to allocate a second page while the first remains owned, and only releases
+  the page if both GART hubs are already retired during teardown. This avoids losing
+  the only software owner handle when the self-test returns after a bind/DMA failure.
 - The separate, dormant `GARTContext` `gart_unbind` path no longer frees its owned
   `SysMem` while leaving a valid PTE behind; it quarantines the backing and slot.
 
