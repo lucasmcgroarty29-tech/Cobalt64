@@ -211,6 +211,10 @@ ih_init(DeviceContext &dev, IHContext &ih)
 void
 ih_release(IHContext &ih)
 {
+    if (ih.enabled) {
+        IH_LOG("release refused — IH ring may still DMA; ring and writeback backing remain quarantined");
+        return;
+    }
     sysmem_free(ih.wptr_mem);
     sysmem_free(ih.ring_mem);
     ih.ring_bus = 0; ih.ring_cpu = nullptr;
@@ -272,8 +276,15 @@ ih_disable_interrupts(const DeviceContext &dev, IHContext &ih)
     cntl &= ~(1u << kIH_RB_CNTL__RB_ENABLE__SHIFT);
     cntl &= ~(1u << kIH_RB_CNTL__ENABLE_INTR__SHIFT);
     WREG32(dev, cntl_reg, cntl);
+    // Read back the control register to drain the posted write and confirm
+    // RB_ENABLE is actually clear before the software marks DMA quiescent.
+    const uint32_t readback = RREG32(dev, cntl_reg);
+    if (readback & (1u << kIH_RB_CNTL__RB_ENABLE__SHIFT)) {
+        IH_LOG("disable refused — IH_RB_CNTL readback still has RB_ENABLE set (%#010x); backing retained", readback);
+        return kIOReturnNotReady;
+    }
 
-    // set rptr, wptr to 0
+    // set rptr, wptr to 0 only after the hardware disable is observed.
     WREG32(dev, SOC15_REG_OFFSET(dev, IPBlock::OSSSYS, IHRegs::IH_RB_RPTR), 0);
     WREG32(dev, SOC15_REG_OFFSET(dev, IPBlock::OSSSYS, IHRegs::IH_RB_WPTR), 0);
     ih.enabled = false;
