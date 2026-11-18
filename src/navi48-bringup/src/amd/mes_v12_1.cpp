@@ -432,8 +432,14 @@ mes_enable(const DeviceContext &dev, MESContext &mes, bool enable)
         v = REG_SET_FIELD(v, CP_MES_CNTL, MES_PIPE1_RESET, 1);
         v = REG_SET_FIELD(v, CP_MES_CNTL, MES_HALT, 1);
         WREG32(dev, cnt_reg, v);
+        const uint32_t readback = RREG32(dev, cnt_reg);
         MES_LOG("enable(false): CP_MES_CNTL wrote %#x, readback %#x",
-                v, RREG32(dev, cnt_reg));
+                v, readback);
+        if (REG_GET_FIELD(readback, CP_MES_CNTL, MES_PIPE0_ACTIVE) != 0 ||
+            REG_GET_FIELD(readback, CP_MES_CNTL, MES_PIPE1_ACTIVE) != 0) {
+            MES_LOG("enable(false): scheduler pipe still reports ACTIVE; preserving enabled ownership state");
+            return kIOReturnNotReady;
+        }
         mes.pipe[0].enabled = false;
         mes.pipe[1].enabled = false;
         return kIOReturnSuccess;
