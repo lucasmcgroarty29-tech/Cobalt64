@@ -2853,8 +2853,8 @@ static uint32_t fc_staging_bind() {
 	const kern_return_t kr = amdgpu::gmc_bind_existing(*gBringup.dev, gBringup.gmc, gFcStaging.bus, N48_FC_STAGING_BYTES, &mc);
 	gFcBumpAfter = __atomic_load_n(&gBringup.gmc.gart_bump_offset, __ATOMIC_ACQUIRE);
 	if (kr != KERN_SUCCESS || !mc || mc == gBringup.gmc.gart_start) {
-		N48LOG("fastcopy63: STAGING REFUSED - gmc_bind_existing %#x, MC %#llx (GART page 0 is Apple's write-back page); the buffer "
-		       "is kept, unbound", (unsigned)kr, (unsigned long long)mc);
+		N48LOG("fastcopy63: STAGING REFUSED - gmc_bind_existing %#x, MC %#llx; backing retained because PTE visibility is uncertain",
+		       (unsigned)kr, (unsigned long long)mc);
 		return 4u;
 	}
 	gFcStagingMc = mc;
@@ -3060,8 +3060,8 @@ static uint32_t fc89_rb_bind() {
 	const kern_return_t kr = amdgpu::gmc_bind_existing(*gBringup.dev, gBringup.gmc, gFc89Rb.bus, N48_FC_STAGING_BYTES, &mc);
 	const uint64_t b1 = __atomic_load_n(&gBringup.gmc.gart_bump_offset, __ATOMIC_ACQUIRE);
 	if (kr != KERN_SUCCESS || !mc || mc == gBringup.gmc.gart_start) {
-		N48LOG("fastcopy89: READ-BACK BUFFER REFUSED - gmc_bind_existing %#x, MC %#llx; the buffer is kept, unbound", (unsigned)kr,
-		       (unsigned long long)mc);
+		N48LOG("fastcopy89: READ-BACK BUFFER REFUSED - gmc_bind_existing %#x, MC %#llx; backing retained because PTE visibility is uncertain",
+		       (unsigned)kr, (unsigned long long)mc);
 		return 4u;
 	}
 	gFc89RbMc = mc;
