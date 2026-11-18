@@ -438,10 +438,9 @@ mes_grbm_select(const DeviceContext &dev, uint32_t me, uint32_t pipe,
 kern_return_t mes_alloc_storage(DeviceContext &dev, GMCContext &gmc,
                                 MESInstance &inst);
 
-// Release everything mes_alloc_storage / the lazy allocators took.
-// GART slots are bump-allocated and are NOT reclaimed (see
-// gmc_bind_existing) — the PTEs simply stop being referenced.
-void mes_release_storage(MESContext &mes);
+// Release MES storage only after both GART hubs have been disabled/retired.
+// Otherwise retain every GART-mapped page and its owner handle.
+void mes_release_storage(GMCContext &gmc, MESContext &mes);
 
 // CP_MES_CNTL enable/disable for uni_mes pipe 0. Writes
 // PRGRM_CNTR_START/_HI from inst.uc_start_addr (caller must have
