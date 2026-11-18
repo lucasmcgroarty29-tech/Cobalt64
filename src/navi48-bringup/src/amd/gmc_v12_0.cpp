@@ -703,7 +703,16 @@ gmc_gfxhub_offsets_init(GMCContext &gmc)
 kern_return_t
 gmc_alloc_resources(DeviceContext &dev, GMCContext &gmc)
 {
-    if (gmc.gart_pt_bus != 0) return kIOReturnSuccess;
+    if (gmc.gart_pt_bus != 0) {
+        if (!gmc.dummy_page.valid() || !gmc.mem_scratch.valid() ||
+            gmc.dummy_page_bus == 0 || gmc.mem_scratch_bus == 0) {
+            GMC_LOG("alloc_resources: partial prior allocation detected (dummy=%d scratch=%d); refusing to report ready or replace retained backing",
+                    gmc.dummy_page.valid() ? 1 : 0,
+                    gmc.mem_scratch.valid() ? 1 : 0);
+            return kIOReturnNotReady;
+        }
+        return kIOReturnSuccess;
+    }
     if (!gmc.inited) return kIOReturnNotReady;
 
     // GART page table — 4 KB GPU pages (matches upstream
