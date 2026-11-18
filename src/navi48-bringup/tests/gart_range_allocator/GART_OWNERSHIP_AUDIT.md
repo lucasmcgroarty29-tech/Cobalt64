@@ -753,6 +753,10 @@ storage while either MMHUB or GFXHUB still reports its GART context enabled:
   successfully mapped allocation. SDMA teardown also releases a retained failed-bind
   page after the GART hubs are eventually retired, even if the instance used its VRAM
   fallback.
+- The clear-state buffer and fast-copy staging/read-back owners in `Navi48Bringup.cpp`
+  now refuse to reallocate or rebind a retained page after an unconfirmed bind. The
+  GMC resource allocator also refuses to report success for a partially-created
+  dummy-page/scratch pair.
 - The separate, dormant `GARTContext` `gart_unbind` path no longer frees its owned
   `SysMem` while leaving a valid PTE behind; it quarantines the backing and slot.
 
