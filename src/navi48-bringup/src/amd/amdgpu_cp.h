@@ -650,9 +650,9 @@ struct CPContext {
 kern_return_t cp_alloc_storage(DeviceContext &dev,
                                GMCContext &gmc, CPContext &cp);
 
-// Free everything cp_alloc_storage allocated. The GART slots stay "used"
-// (the GART bump allocator has no free) until the page table is re-zeroed.
-void cp_release_storage(CPContext &cp);
+// Free CP storage only after command ownership is settled AND both GART
+// hubs have been disabled/retired. Otherwise retain the GART-mapped backing.
+void cp_release_storage(GMCContext &gmc, CPContext &cp);
 
 // Append PM4 dwords to the ring at the current software wptr.
 // Wraps modulo the ring size. Returns the number of dwords written
