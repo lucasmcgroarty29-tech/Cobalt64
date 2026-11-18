@@ -919,7 +919,7 @@ void bringup_teardown(BringupContext &ctx) {
     ctx.gfxhubReady      = false;
     ctx.doorbellPathReady = false;
     ctx.reached          = BringupStage::None;
-    INIT_LOG("teardown: done — engines halted, scheduler parked, all buffers released");
+    INIT_LOG("teardown: done — engines halted, scheduler parked; GART-backed storage released only if both hubs were retired, otherwise quarantined");
 }
 
 kern_return_t bringup_to(BringupContext &ctx, BringupStage target) {
