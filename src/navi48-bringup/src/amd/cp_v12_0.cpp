@@ -2637,7 +2637,11 @@ cp_init_full(DeviceContext &dev, GMCContext &gmc, CPContext &cp,
     // configuration real hardware runs) — cp_compute_enable(true) then
     // cp_gfx_enable(true), with NO queue programmed yet. On the legacy
     // !async path (gfx_v12_0_kcq_resume:3118) only the MEC is enabled here.
-    cp_compute_enable(dev, true);
+    r = cp_compute_enable(dev, true);
+    if (r != kIOReturnSuccess) {
+        CP_LOG("cp_init_full: MEC unhalt not acknowledged: %#x", r);
+        return r;
+    }
 
     if (!legacy_rb) {
         // (7) async path: unhalt PFP/ME now. The kernel GFX queue is created
