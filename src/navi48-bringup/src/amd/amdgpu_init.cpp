@@ -859,7 +859,8 @@ void bringup_teardown(BringupContext &ctx) {
             // A missing acknowledgement does not prove the firmware removed
             // the queue. Preserve both mapping flags and quarantine CP storage.
             ctx.cp.submission_uncertain = true;
-            INIT_LOG("teardown: GFX queue ownership uncertain; preserving mapped state and CP backing");
+            ctx.mes.queue_ownership_uncertain = true;
+            INIT_LOG("teardown: GFX queue ownership uncertain; preserving mapped state and CP/MES backing");
         }
     }
 
@@ -876,7 +877,8 @@ void bringup_teardown(BringupContext &ctx) {
             // Keep the queue marked mapped so cp_compute_queue_release refuses
             // to free its ring/MQD/EOP/WB backing after an uncertain REMOVE.
             ctx.kcq.submission_uncertain = true;
-            INIT_LOG("teardown: compute queue ownership uncertain; preserving mapping and backing");
+            ctx.mes.queue_ownership_uncertain = true;
+            INIT_LOG("teardown: compute queue ownership uncertain; preserving mapping and CP/MES backing");
         }
     }
 
