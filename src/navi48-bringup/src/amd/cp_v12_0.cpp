@@ -386,7 +386,7 @@ cp_alloc_storage(DeviceContext &dev, GMCContext &gmc, CPContext &cp)
                            &cp.mqd_sys, &cp.mqd_bus, &cpu);
     if (r != kIOReturnSuccess) {
         CP_LOG("KIQ MQD sysmem alloc failed: %#x", r);
-        cp_release_storage(cp);
+        cp_release_storage(gmc, cp);
         return r;
     }
     cp.mqd_cpu = cpu;
@@ -397,7 +397,7 @@ cp_alloc_storage(DeviceContext &dev, GMCContext &gmc, CPContext &cp)
                            &cp.wb_sys, &cp.wb_bus, &cpu);
     if (r != kIOReturnSuccess) {
         CP_LOG("WB page alloc failed: %#x", r);
-        cp_release_storage(cp);
+        cp_release_storage(gmc, cp);
         return r;
     }
     auto *wb = static_cast<uint8_t *>(cpu);
@@ -428,16 +428,17 @@ cp_alloc_storage(DeviceContext &dev, GMCContext &gmc, CPContext &cp)
 }
 
 void
-cp_release_storage(CPContext &cp)
+cp_release_storage(GMCContext &gmc, CPContext &cp)
 {
     if (cp.submission_uncertain || cp.kgq_mapped || cp.legacy_ring_armed) {
         CP_LOG("storage release refused — CP command completion or MES mapping is still active/uncertain; ring, MQD and WB backing remain quarantined");
         return;
     }
-    // GART slots stay "used" — the GART bump allocator has no free — so the
-    // PTEs keep pointing at memory we are about to hand back. Nothing reads
-    // them until the page table is re-zeroed by GMC; same bump-only
-    // behaviour the reference documents for its VRAM allocator.
+    if (gmc.mmhub.gart_enabled || gmc.gfxhub.gart_enabled) {
+        CP_LOG("storage release refused — a GART hub remains enabled; ring, MQD and WB backing remain quarantined");
+        return;
+    }
+    // The PTEs are only safe to retire after both translation hubs are disabled.
     sysmem_free(cp.wb_sys);
     sysmem_free(cp.mqd_sys);
     sysmem_free(cp.ring_sys);
@@ -2727,9 +2728,12 @@ cp_compute_queue_alloc(DeviceContext &dev, GMCContext &gmc, ComputeQueue &cq,
 void
 cp_compute_queue_release(GMCContext &gmc, ComputeQueue &cq)
 {
-    (void)gmc;
     if (cq.submission_uncertain || cq.mapped) {
         CP_LOG("compute queue release refused — command completion or MES mapping is still active/uncertain; ring/MQD/EOP/WB backing remains quarantined");
+        return;
+    }
+    if (gmc.mmhub.gart_enabled || gmc.gfxhub.gart_enabled) {
+        CP_LOG("compute queue release refused — a GART hub remains enabled; ring/MQD/EOP/WB backing remains quarantined");
         return;
     }
     sysmem_free(cq.ring_sys); sysmem_free(cq.mqd_sys);
