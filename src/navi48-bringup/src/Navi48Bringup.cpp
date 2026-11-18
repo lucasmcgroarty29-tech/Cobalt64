@@ -3047,6 +3047,10 @@ static uint32_t fc89_rb_bind() {
 		N48LOG("fastcopy89: READ-BACK BUFFER REFUSED - the GART bump region is LOW (navi48-gart-high is not 1): switch 89 stays inert");
 		return 2u;
 	}
+	if (gFc89Rb.valid() && !gFc89RbMc) {
+		N48LOG("fastcopy89: READ-BACK BUFFER REFUSED - a previous bind attempt retained the backing page without a verified MC mapping");
+		return 4u;
+	}
 	if (!gFc89Rb.valid() && (amdgpu::sysmem_alloc(gFc89Rb, N48_FC_STAGING_BYTES, 4096) != KERN_SUCCESS || !gFc89Rb.valid())) {
 		N48LOG("fastcopy89: READ-BACK BUFFER REFUSED - no physically contiguous %u-byte system-memory buffer", N48_FC_STAGING_BYTES);
 		return 3u;
