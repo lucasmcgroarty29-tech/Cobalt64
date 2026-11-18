@@ -266,9 +266,6 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
         binding->gartMCAddr != 0 || binding->numGPUPages != 0 ||
         binding->bind_acknowledged;
     const bool reuse = has_metadata;
-    if (reuse && (binding->gartMCAddr == 0 || binding->busAddr != busAddr ||
-                  binding->sizeBytes != rounded || binding->numGPUPages != numPTEs))
-        return kIOReturnBusy; // exact same backing and extent only; never leave stale tail PTEs
     const uint64_t gartOff = reuse ? binding->gartOffset : gart.nextFreeOffset;
     if ((gartOff & (kAMDGPUGPUPageSize - 1)) != 0 ||
         !gart_checked_range(gart.gartSize, gartOff, rounded))
@@ -280,9 +277,12 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
     if (!gart_checked_pte_vram_range(gart.pageTableVRAMOffset,
                                      gart.pageTableSize, pteStartIndex,
                                      numPTEs, &pteBaseOffset) ||
-        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr) ||
-        (reuse && binding->gartMCAddr != gartMCAddr))
+        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
         return kIOReturnBadArgument;
+    if (reuse && !gart_binding_reuse_exact(
+            binding->gartMCAddr, binding->busAddr, binding->sizeBytes,
+            binding->numGPUPages, gartMCAddr, busAddr, rounded, numPTEs))
+        return kIOReturnBusy; // exact same backing, extent and slot only
 
     const uint64_t pteBytes = (uint64_t)numPTEs * sizeof(uint64_t);
     if (!dev.bar0 ||
