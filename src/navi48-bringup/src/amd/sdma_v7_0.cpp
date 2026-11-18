@@ -330,6 +330,11 @@ sdma_release_storage(GMCContext &gmc, SDMAInstance &inst)
                  inst.instance);
         return;
     }
+    if (gmc.mmhub.gart_enabled || gmc.gfxhub.gart_enabled) {
+        SDMA_LOG("instance %u: release_storage refused — a GART hub remains enabled; ring and writeback backing remain quarantined",
+                 inst.instance);
+        return;
+    }
     if (gmc.vram_alloc.is_inited()) {
         VRAMAllocation a{};
         a.gpu_va = inst.ring_gpu_va;
