@@ -911,7 +911,7 @@ void bringup_teardown(BringupContext &ctx) {
         sdma_release_storage(ctx.gmc, ctx.sdma.instance[i]);
     mes_release_storage(ctx.mes);
     cp_compute_queue_release(ctx.gmc, ctx.kcq);
-    cp_release_storage(ctx.cp);
+    cp_release_storage(ctx.gmc, ctx.cp);
     ih_release(ctx.ih);
     psp_release(ctx.psp);
     gmc_release_resources(ctx.gmc);
