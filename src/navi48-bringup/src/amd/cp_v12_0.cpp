@@ -346,7 +346,9 @@ cp_alloc_dma_block(DeviceContext &dev, GMCContext &gmc, uint64_t size,
         CP_LOG("%s GART bind failed: %#x (bus=%#llx size=%llu)",
                what, r, (unsigned long long)outSys->bus,
                (unsigned long long)outSys->size);
-        sysmem_free(*outSys);
+        // gmc_bind_existing may have written some PTEs before an HDP
+        // flush failure. Keep the owner handle intact; release is deferred
+        // to cp_release_storage, which is gated on both GART hubs being off.
         return r;
     }
 
