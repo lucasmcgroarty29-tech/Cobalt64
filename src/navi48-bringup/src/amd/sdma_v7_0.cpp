@@ -324,8 +324,8 @@ sdma_alloc_storage(DeviceContext &dev, SDMAInstance &inst, GMCContext &gmc)
 }
 
 //------------------------------------------------------------------
-// sdma_release_storage — not in the reference (a dext leaks these on
-// unload; a kext must not). Frees the VRAM slots and the sysmem WB.
+// sdma_release_storage — release after queue ownership is settled and
+// both GART hubs are retired. Until then, retain mapped backing.
 //------------------------------------------------------------------
 void
 sdma_release_storage(GMCContext &gmc, SDMAInstance &inst)
