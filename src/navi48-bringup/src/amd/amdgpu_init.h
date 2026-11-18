@@ -73,6 +73,10 @@ struct BringupContext {
     // enough that a revert still leaves stages 16/17 running on the flat
     // table. Inert unless navi48-pdb0=1 put the PDB0 in place at stage 12.
     PDB0SelfTest   pdb0Test {};
+    // GART round-trip test backing is kept here rather than in a local SysMem
+    // so a failed/uncertain bind cannot lose its owner handle on function exit.
+    // It is released only after both translation hubs are known to be retired.
+    SysMem          pdb0TestPage {};
     // 0.0.185 — the SDMA0 QUEUE1 doorbell-routing self-test (navi48-sdma-q1-test=1).
     // Runs at the END of SDMAInit for the same reason the PDB0 one does: QUEUE0
     // has just resumed (its MCU unhalt and instance-wide registers are what
