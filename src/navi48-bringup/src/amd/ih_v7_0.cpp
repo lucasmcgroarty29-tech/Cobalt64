@@ -279,8 +279,9 @@ ih_disable_interrupts(const DeviceContext &dev, IHContext &ih)
     // Read back the control register to drain the posted write and confirm
     // RB_ENABLE is actually clear before the software marks DMA quiescent.
     const uint32_t readback = RREG32(dev, cntl_reg);
-    if (readback & (1u << kIH_RB_CNTL__RB_ENABLE__SHIFT)) {
-        IH_LOG("disable refused — IH_RB_CNTL readback still has RB_ENABLE set (%#010x); backing retained", readback);
+    if (readback & ((1u << kIH_RB_CNTL__RB_ENABLE__SHIFT) |
+                    (1u << kIH_RB_CNTL__ENABLE_INTR__SHIFT))) {
+        IH_LOG("disable refused — IH_RB_CNTL readback still has RB_ENABLE or ENABLE_INTR set (%#010x); backing retained", readback);
         return kIOReturnNotReady;
     }
 
