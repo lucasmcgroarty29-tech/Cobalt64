@@ -91,6 +91,11 @@ struct GARTContext {
 // stashed in the GARTBinding so gart_unbind can release it.
 //
 // alignment is coerced up to kAMDGPUGPUPageSize (4 KB) at minimum.
+// `outBinding` must be zero-initialised and remain owned by the caller.
+// Once SysMem allocation succeeds, its owner handle and reserved slot are
+// published into `outBinding` BEFORE PTE writes. If the function then
+// returns an error (for example, an HDP flush timeout), the populated binding
+// is quarantined and MUST NOT be freed or used for GPU work.
 //
 kern_return_t gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
                                uint64_t sizeBytes, uint64_t alignment,
