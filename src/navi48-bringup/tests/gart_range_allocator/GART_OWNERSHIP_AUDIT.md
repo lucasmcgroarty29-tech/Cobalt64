@@ -768,6 +768,13 @@ storage while either MMHUB or GFXHUB still reports its GART context enabled:
   HDP flush fails, the caller retains the only owner handle and can keep it quarantined;
   a retry cannot overwrite an existing binding.
 
+The legacy GART binding helpers now retain their owner/slot metadata before PTE
+publication and mark the binding acknowledged only after the HDP flush succeeds.
+Rebinding an existing slot is restricted to the exact same bus address, rounded
+size, page count and computed MC address. A smaller replacement can no longer
+leave stale tail PTEs reachable, and a failed attempt can only retry that same
+mapping. Host-side tests cover the exact-match policy.
+
 The host-side lifecycle model now also records independently confirmed in-flight
 completions after a mapping has entered quarantine. The state remains terminally
 quarantined: completion accounting cannot clear PTEs, invalidate contexts, or make
