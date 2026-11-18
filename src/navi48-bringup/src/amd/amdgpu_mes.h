@@ -376,6 +376,10 @@ struct MESInstance {
 
 struct MESContext {
     MESInstance pipe[kMaxMESPipes];
+    // Sticky fail-stop if REMOVE_QUEUE is not acknowledged during teardown.
+    // Keep MES backing even after the scheduler is halted: firmware may retain
+    // queue metadata and a later start must not inherit freed ring pages.
+    bool        queue_ownership_uncertain { false };
     bool        sched_ucode_loaded { false };  // RS64_MES (76) seen via LoadFirmware
     bool        kiq_ucode_loaded   { false };  // RS64_KIQ  (78) seen — N/A for uni
     bool        uni_mes_active     { false };
