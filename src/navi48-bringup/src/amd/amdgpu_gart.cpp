@@ -144,8 +144,10 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
                  GARTBinding *outBinding)
 {
     if (outBinding == nullptr) return kIOReturnBadArgument;
-    if (outBinding->sysmem.md != nullptr || outBinding->busAddr != 0 ||
-        outBinding->cpuAddr != nullptr || outBinding->sizeBytes != 0 ||
+    if (outBinding->sysmem.md != nullptr || outBinding->sysmem.cpu != nullptr ||
+        outBinding->sysmem.bus != 0 || outBinding->sysmem.size != 0 ||
+        outBinding->busAddr != 0 || outBinding->cpuAddr != nullptr ||
+        outBinding->sizeBytes != 0 ||
         outBinding->gartOffset != 0 || outBinding->gartMCAddr != 0 ||
         outBinding->numGPUPages != 0 || outBinding->bind_acknowledged)
         return kIOReturnBusy; // never overwrite an owner handle or live slot
@@ -260,7 +262,9 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
         !gart_checked_bus_span(busAddr, rounded))
         return kIOReturnBadArgument;
 
-    if (binding->sysmem.md != nullptr) return kIOReturnBusy;
+    if (binding->sysmem.md != nullptr || binding->sysmem.cpu != nullptr ||
+        binding->sysmem.bus != 0 || binding->sysmem.size != 0)
+        return kIOReturnBusy;
     const bool has_metadata = binding->busAddr != 0 || binding->cpuAddr != nullptr ||
         binding->sizeBytes != 0 || binding->gartOffset != 0 ||
         binding->gartMCAddr != 0 || binding->numGPUPages != 0 ||
