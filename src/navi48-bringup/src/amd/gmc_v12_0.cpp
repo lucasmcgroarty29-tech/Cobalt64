@@ -776,6 +776,17 @@ gmc_alloc_resources(DeviceContext &dev, GMCContext &gmc)
 void
 gmc_release_resources(GMCContext &gmc)
 {
+    // The current teardown has no acknowledged inverse for MMHUB/GFXHUB
+    // GART enable. Do not release pages or forget the page-table backing
+    // while either hub can still walk its programmed translation context.
+    // A future teardown must disable/retire each enabled hub and confirm
+    // the required TLB invalidations before this resource release proceeds.
+    if (gmc.mmhub.gart_enabled || gmc.gfxhub.gart_enabled) {
+        GMC_LOG("release_resources refused — MMHUB/GFXHUB GART context remains enabled; "
+                "page-table, dummy-page and scratch backing retained");
+        return;
+    }
+
     gmc.vram_alloc_hi.init(0, 0, nullptr);   // drop every hi-pool node
     sysmem_free(gmc.mem_scratch);
     sysmem_free(gmc.dummy_page);
