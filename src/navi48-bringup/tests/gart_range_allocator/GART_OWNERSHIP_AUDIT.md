@@ -760,6 +760,11 @@ storage while either MMHUB or GFXHUB still reports its GART context enabled:
 - The separate, dormant `GARTContext` `gart_unbind` path no longer frees its owned
   `SysMem` while leaving a valid PTE behind; it quarantines the backing and slot.
 
+The host-side lifecycle model now also records independently confirmed in-flight
+completions after a mapping has entered quarantine. The state remains terminally
+quarantined: completion accounting cannot clear PTEs, invalidate contexts, or make
+the mapping reusable. Its unit test covers this distinction.
+
 This is a **safety mitigation, not completed reclamation**. The driver still lacks an
 acknowledged MMHUB/GFXHUB GART-disable and translation-retirement sequence. The free-range
 allocator remains unintegrated; no GART slot is returned for reuse. A complete solution
