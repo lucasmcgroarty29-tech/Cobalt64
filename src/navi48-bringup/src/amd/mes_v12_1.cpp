@@ -134,7 +134,8 @@ mes_alloc_gtt_block(DeviceContext &dev, GMCContext &gmc, uint64_t size,
         MES_LOG("%s: gart bind of bus=%#llx (%llu B) failed: %#x",
                 what, (unsigned long long)mem.bus,
                 (unsigned long long)mem.size, r);
-        sysmem_free(mem);
+        // PTE writes may have reached the page table before an HDP flush
+        // failure. Keep the SysMem owner handle for guarded teardown.
         return r;
     }
     memset(mem.cpu, 0, (size_t)mem.size);
