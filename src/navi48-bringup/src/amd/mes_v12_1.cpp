@@ -117,9 +117,12 @@ mes_alloc_gtt_block(DeviceContext &dev, GMCContext &gmc, uint64_t size,
                     const char *what)
 {
     *outMc = 0; *outCpu = nullptr;
-    if (mem.valid()) {           // already allocated — idempotent like the reference
-        *outCpu = mem.cpu;
-        return kIOReturnSuccess;
+    if (mem.valid()) {
+        // A previous attempt may have retained this page after a failed HDP
+        // acknowledgement. Without a stored, verified MC address it cannot
+        // be treated as a successful idempotent bind.
+        MES_LOG("%s: retained backing has no verified GART binding; refusing retry", what);
+        return kIOReturnNotReady;
     }
     // gmc_bind_existing requires a 4 KB-aligned bus address.
     kern_return_t r = sysmem_alloc(mem, size, kAMDGPUGPUPageSize);
