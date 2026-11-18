@@ -2893,7 +2893,7 @@ kern_return_t
 cp_compute_submit_ib(const DeviceContext &dev, ComputeQueue &cq, uint64_t ib_gpu_va,
                      uint32_t length_dw, uint32_t vmid, uint32_t *out_fence)
 {
-    if (!cq.inited || cq.submission_uncertain || cq.fence_cpu == nullptr) return kIOReturnNotReady;
+    if (!cq.inited || !cq.mapped || cq.submission_uncertain || cq.fence_cpu == nullptr) return kIOReturnNotReady;
     if (length_dw == 0 || length_dw > 0xFFFFFu) return kIOReturnBadArgument;
     if ((ib_gpu_va & 0x3ull) != 0 || vmid > 15) return kIOReturnBadArgument;
 
@@ -2970,7 +2970,7 @@ kern_return_t
 cp_compute_wait_fence(ComputeQueue &cq, uint32_t fence, uint64_t timeout_us,
                       uint64_t *observed, uint64_t *elapsed_us)
 {
-    if (!cq.inited || cq.submission_uncertain || cq.fence_cpu == nullptr) return kIOReturnNotReady;
+    if (!cq.inited || !cq.mapped || cq.submission_uncertain || cq.fence_cpu == nullptr) return kIOReturnNotReady;
     constexpr uint64_t kFastUs = 5000;
     uint64_t elapsed = 0, v = 0;
     while (elapsed < timeout_us) {
