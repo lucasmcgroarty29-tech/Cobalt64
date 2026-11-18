@@ -97,9 +97,14 @@ kern_return_t gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
                                GARTBinding *outBinding);
 
 //
-// gart_unbind — release a binding (free the SysMem buffer, drop the
-// binding's addresses). Bump allocator: the GART slot stays "used"
-// until the table is re-zeroed.
+// gart_unbind — conservatively quarantine an owned SysMem binding.
+//
+// This API cannot prove that GPU users are idle or perform the required
+// PTE clear, HDP drain and MMHUB/GFXHUB TLB invalidations. It therefore
+// retains the SysMem backing and GART slot rather than freeing memory
+// behind a potentially live translation. Do not treat this as successful
+// reclamation. A future reclaim API must establish the full retirement
+// sequence before releasing either resource.
 //
 void gart_unbind(GARTContext &gart, GARTBinding *binding);
 
