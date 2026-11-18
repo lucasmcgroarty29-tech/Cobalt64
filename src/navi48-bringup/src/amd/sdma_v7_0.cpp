@@ -189,6 +189,10 @@ kern_return_t
 sdma_alloc_storage(DeviceContext &dev, SDMAInstance &inst, GMCContext &gmc)
 {
     if (inst.inited) return kIOReturnSuccess;
+    if (inst.wb_sysmem.valid()) {
+        SDMA_LOG("instance %u: alloc_storage refused — a previous writeback page remains retained after an incomplete GART bind; retire it before retrying", inst.instance);
+        return kIOReturnNotReady;
+    }
     if (!gmc.vram_alloc.is_inited()) {
         SDMA_LOG("instance %u: vram_alloc not ready", inst.instance);
         return kIOReturnNotReady;
