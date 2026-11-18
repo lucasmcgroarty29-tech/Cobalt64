@@ -199,6 +199,10 @@ static LegResult leg_write(uint32_t leg, uint32_t ibPg, const Dst *d, uint32_t n
     clear_gfx_faults();
     uint64_t us = 0;
     const bool landed = submit_wait(ibVa, at, kLegName[leg], timedOut, &us);
+    if (!landed) {
+        NAT_LOG("leg %s: fence did not land; skipping destination readback because the GPU may still own the pages", kLegName[leg]);
+        return kLegFail;
+    }
     for (uint32_t k = 0; k < nd; k++) *bad += count_wrong(d[k].pg, d[k].off, kPatWords, d[k].seed);
     const uint32_t sLo = hub_rd(0x15d0), aLo = hub_rd(0x15d2);
     const bool pass = landed && *bad == 0u;
@@ -224,7 +228,8 @@ static LegResult leg_compute(bool *timedOut, uint32_t *bad) {
     const uint64_t shOff = E.dataOff + (uint64_t)kPgShader * 0x1000u;
     bar0_memset_vram(dev, shOff, 0xBFB00000u, 0x1000u);
     bar0_memcpy_to_vram(dev, shOff, code, codeBytes);
-    if (!poison_page_range(kPgResult, 0, 0x1000u) || !amdgpu_hdp_flush(dev)) {
+    // poison_page_range performs the checked HDP drain for both the result poison and the earlier shader writes.
+    if (!poison_page_range(kPgResult, 0, 0x1000u)) {
         NAT_LOG("leg compute FAIL HDP flush unavailable while staging shader/result");
         return kLegFail;
     }
@@ -235,6 +240,10 @@ static LegResult leg_compute(bool *timedOut, uint32_t *bad) {
     clear_gfx_faults();
     uint64_t us = 0;
     const bool landed = submit_wait(ibVa, n, "compute", timedOut, &us);
+    if (!landed) {
+        NAT_LOG("leg compute: fence did not land; skipping result readback because the GPU may still own the result page");
+        return kLegFail;
+    }
     uint32_t wrong = 0;
     for (uint32_t i = 0; i < kComputeThreadsX; i++)
         if (RBAR0_32(dev, E.dataOff + (uint64_t)kPgResult * 0x1000u + (uint64_t)i * 4u) != kComputeMagic + i) wrong++;
@@ -264,7 +273,9 @@ static LegResult leg_fault(bool *timedOut) {
     gN.faultStatusLo = sLo;
     gN.faultVa = fault_addr_va(aLo, aHi);
     uint32_t f2fence = 0;
-    const kern_return_t k2 = cp_submit_eop_test(dev, *E.cp, kWaitBoundUs, &f2fence);
+    const kern_return_t k2 = f1
+        ? cp_submit_eop_test(dev, *E.cp, kWaitBoundUs, &f2fence)
+        : kIOReturnNotReady;  // Never publish another packet after an unretired fault-leg submission.
     const bool f2 = (k2 == kIOReturnSuccess);
     if (!f2) *timedOut = true;
     gN.nextFenceLanded = f2;
