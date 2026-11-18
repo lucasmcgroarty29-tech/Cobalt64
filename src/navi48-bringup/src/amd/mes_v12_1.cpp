@@ -232,9 +232,9 @@ mes_alloc_storage(DeviceContext &dev, GMCContext &gmc, MESInstance &inst)
 }
 
 //------------------------------------------------------------------
-// mes_release_storage — deviation 9. GART slots are bump-allocated
-// by gmc_bind_existing and are not reclaimed; only the host pages go
-// back. Safe to call on a partially-initialised context.
+// mes_release_storage — release only after both GART hubs are retired.
+// While either hub remains enabled, retain every mapped owner page.
+// Safe to call on a partially-initialised context.
 //------------------------------------------------------------------
 void
 mes_release_storage(GMCContext &gmc, MESContext &mes)
