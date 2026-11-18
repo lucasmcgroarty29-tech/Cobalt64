@@ -820,10 +820,11 @@ kern_return_t run_stage(BringupContext &ctx, BringupStage s) {
 // ===========================================================================
 //
 // Order is the reverse of bring-up, and the first three steps matter most:
-// a mapped MES queue and a running CP both hold pointers into GART sysmem
-// that IOFree is about to reclaim, so they are stopped before anything is
-// released. Each step is independently guarded, so tearing down from a
-// half-finished ladder (a stage failed) is fine.
+// a mapped MES queue and a running CP both hold pointers into GART sysmem,
+// so they are stopped before cleanup. Queue backing is released only after
+// acknowledged removal AND GART hub retirement; when that retirement is not
+// available, release helpers deliberately quarantine the allocations. Each
+// step is independently guarded for teardown from a partially-complete ladder.
 //
 // Not done here, on purpose:
 //   * no GPU reset — the UEFI console is still scanning out of VRAM and a
