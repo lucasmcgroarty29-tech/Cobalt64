@@ -2840,6 +2840,10 @@ static uint32_t fc_staging_bind() {
 		       "bound among Apple's pages. The path stays OFF (every copy keeps the MM window)");
 		return 2u;
 	}
+	if (gFcStaging.valid()) {
+		N48LOG("fastcopy63: STAGING REFUSED - a previous bind attempt retained the backing page without a verified MC mapping");
+		return 4u;
+	}
 	if (amdgpu::sysmem_alloc(gFcStaging, N48_FC_STAGING_BYTES, 4096) != KERN_SUCCESS || !gFcStaging.valid()) {
 		N48LOG("fastcopy63: STAGING REFUSED - no physically contiguous %u-byte system-memory buffer", N48_FC_STAGING_BYTES);
 		return 3u;
