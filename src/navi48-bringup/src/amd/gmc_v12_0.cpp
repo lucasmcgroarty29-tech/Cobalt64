@@ -1267,6 +1267,10 @@ gmc_mmhub_gart_enable(DeviceContext &dev, GMCContext &gmc)
                 (unsigned)gmc.mmhub.ip);
         return kIOReturnNotReady;
     }
+    if (gmc.mmhub.gart_enabled) {
+        GMC_LOG("mmhub_gart_enable: already programmed; skipping live register rewrite");
+        return kIOReturnSuccess;
+    }
 
     const bool skip = gmc.skipDisplayRisky;
     if (skip) {
@@ -1535,6 +1539,10 @@ gmc_gfxhub_gart_enable(DeviceContext &dev, GMCContext &gmc)
         GMC_LOG("gfxhub_gart_enable: IP base not resolved (block=%u)",
                 (unsigned)gmc.gfxhub.ip);
         return kIOReturnNotReady;
+    }
+    if (gmc.gfxhub.gart_enabled) {
+        GMC_LOG("gfxhub_gart_enable: already programmed; skipping live register rewrite");
+        return kIOReturnSuccess;
     }
 
     // GFXHUB field layouts mirror MMHUB exactly (see GCVM_* → MMVM_*
