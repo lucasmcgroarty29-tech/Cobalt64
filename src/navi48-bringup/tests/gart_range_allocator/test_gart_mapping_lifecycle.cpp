@@ -67,6 +67,11 @@ static void quarantine_is_fail_closed() {
     assert(gart_lifecycle_quarantine(&l));
     assert(l.state == GART_MAPPING_QUARANTINED && l.in_flight == 1);
     assert(!gart_lifecycle_begin_use(&l));
+    // A separately confirmed completion updates ownership accounting, but
+    // quarantine remains terminal and can never become reusable.
+    assert(gart_lifecycle_end_use(&l));
+    assert(l.in_flight == 0);
+    assert(l.state == GART_MAPPING_QUARANTINED);
     assert(!gart_lifecycle_end_use(&l));
     assert(!gart_lifecycle_ptes_cleared(&l));
     assert(!gart_lifecycle_hdp_flushed(&l));
