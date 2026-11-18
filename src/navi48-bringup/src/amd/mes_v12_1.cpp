@@ -239,6 +239,12 @@ mes_alloc_storage(DeviceContext &dev, GMCContext &gmc, MESInstance &inst)
 void
 mes_release_storage(GMCContext &gmc, MESContext &mes)
 {
+    for (uint32_t p = 0; p < kMaxMESPipes; ++p) {
+        if (mes.pipe[p].enabled) {
+            MES_LOG("release_storage refused — MES pipe %u is still enabled; ring/queue/context backing remains quarantined", p);
+            return;
+        }
+    }
     if (gmc.mmhub.gart_enabled || gmc.gfxhub.gart_enabled) {
         MES_LOG("release_storage refused — a GART hub remains enabled; MES rings, queues and context backing remain quarantined");
         return;
