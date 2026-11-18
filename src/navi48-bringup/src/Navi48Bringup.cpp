@@ -1649,6 +1649,10 @@ bool navi48_csb_publish(uint64_t *mcOut, uint32_t *sizeOut) {
 		return false;
 	}
 	if (!gCsbPublished) {
+		if (gCsbMem.valid()) {
+			N48LOG("csb: a previous GART bind attempt retained the backing page; refusing to reallocate or rebind it");
+			return false;
+		}
 		// 0.0.182: bind through the GMC bump allocator, NOT gart_bind_sysmem. The latter
 		// hands out GART offset 0 = MC 0x8400000000, which is Apple's write-back page;
 		// r6 measured Apple submitting exactly that address and the CP stalling on it.
