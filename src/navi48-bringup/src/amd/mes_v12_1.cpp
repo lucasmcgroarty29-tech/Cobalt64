@@ -233,8 +233,12 @@ mes_alloc_storage(DeviceContext &dev, GMCContext &gmc, MESInstance &inst)
 // back. Safe to call on a partially-initialised context.
 //------------------------------------------------------------------
 void
-mes_release_storage(MESContext &mes)
+mes_release_storage(GMCContext &gmc, MESContext &mes)
 {
+    if (gmc.mmhub.gart_enabled || gmc.gfxhub.gart_enabled) {
+        MES_LOG("release_storage refused — a GART hub remains enabled; MES rings, queues and context backing remain quarantined");
+        return;
+    }
     for (uint32_t p = 0; p < kMaxMESPipes; p++) {
         MESInstance &inst = mes.pipe[p];
         sysmem_free(inst.eop_mem);
