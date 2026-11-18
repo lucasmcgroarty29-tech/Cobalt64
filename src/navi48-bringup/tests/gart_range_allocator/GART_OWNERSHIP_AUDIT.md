@@ -790,6 +790,10 @@ mapping. Host-side tests cover the exact-match policy.
 - SDMA teardown now requires both queue RB/IB disable readback and MCU HALT readback
   before clearing the instance's enabled state. Failed acknowledgements latch
   `submission_uncertain`, so backing cannot be released.
+- CP teardown now requires PFP/ME halt plus CP_STAT idle, and MEC halt/pipe-state
+  readback. Failed halt acknowledgements latch `CPContext::submission_uncertain`.
+  CP bring-up also refuses to continue if the initial halt or MEC unhalt is not
+  acknowledged.
 - PSP teardown records the `DESTROY_RINGS` acknowledgement. If PSP does not acknowledge,
   `psp_release` preserves the ring ownership state rather than resetting software state
   as though the hardware ring had been destroyed.
