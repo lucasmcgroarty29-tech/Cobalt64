@@ -45,6 +45,20 @@ static inline bool gart_checked_pte_range(uint64_t table_bytes,
            (uint64_t)page_count <= total_ptes - first_pte;
 }
 
+static inline bool gart_binding_reuse_exact(uint64_t old_mc,
+                                                uint64_t old_bus,
+                                                uint64_t old_size,
+                                                uint32_t old_pages,
+                                                uint64_t new_mc,
+                                                uint64_t new_bus,
+                                                uint64_t new_size,
+                                                uint32_t new_pages)
+{
+    return old_mc != 0 && old_mc == new_mc &&
+           old_bus == new_bus && old_size == new_size &&
+           old_pages != 0 && old_pages == new_pages;
+}
+
 static inline bool gart_checked_bus_span(uint64_t bus_address,
                                          uint64_t rounded_bytes)
 {
