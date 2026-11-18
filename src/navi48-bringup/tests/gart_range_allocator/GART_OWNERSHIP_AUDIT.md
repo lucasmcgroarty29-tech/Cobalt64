@@ -768,6 +768,11 @@ storage while either MMHUB or GFXHUB still reports its GART context enabled:
   HDP flush fails, the caller retains the only owner handle and can keep it quarantined;
   a retry cannot overwrite an existing binding.
 
+MMHUB and GFXHUB GART enable routines now return without rewriting registers
+when their context is already marked enabled. If a later HDP flush, TLB
+invalidation or GART initialisation step fails, a bring-up retry rechecks those
+acknowledgements without reprogramming an active translation hub.
+
 The legacy GART binding helpers now retain their owner/slot metadata before PTE
 publication and mark the binding acknowledged only after the HDP flush succeeds.
 Rebinding an existing slot is restricted to the exact same bus address, rounded
