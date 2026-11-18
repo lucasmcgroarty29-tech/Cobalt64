@@ -900,8 +900,14 @@ void bringup_teardown(BringupContext &ctx) {
         }
     }
 
-    // (4) Interrupt source off before its ring is freed.
-    if (ctx.ih.inited) ih_v7_0_hw_fini(dev, ctx.ih);
+    // (4) Interrupt source off before its ring is freed. The release helper
+    // independently refuses to free backing unless the hardware disable readback
+    // confirmed RB_ENABLE is clear.
+    if (ctx.ih.inited) {
+        const kern_return_t r = ih_v7_0_hw_fini(dev, ctx.ih);
+        INIT_LOG("teardown: IH disable %s (%#x)",
+                 r == kIOReturnSuccess ? "acknowledged" : "not acknowledged", r);
+    }
 
     // (4b) Destroy the PSP GPCOM ring. The SOS stays alive across a kext
     //      reload (we never reset it), and it remembers the ring — so
