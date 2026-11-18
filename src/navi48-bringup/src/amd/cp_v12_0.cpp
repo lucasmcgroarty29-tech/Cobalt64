@@ -365,6 +365,10 @@ kern_return_t
 cp_alloc_storage(DeviceContext &dev, GMCContext &gmc, CPContext &cp)
 {
     if (cp.inited) return kIOReturnSuccess;
+    if (cp.ring_sys.valid() || cp.mqd_sys.valid() || cp.wb_sys.valid()) {
+        CP_LOG("alloc_storage refused — backing from an incomplete/uncertain GART bind is still owned; retire it before retrying");
+        return kIOReturnNotReady;
+    }
 
     void *cpu = nullptr;
     kern_return_t r;
