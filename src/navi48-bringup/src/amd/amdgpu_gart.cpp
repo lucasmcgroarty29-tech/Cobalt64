@@ -168,7 +168,8 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
     if (!gart_checked_pte_vram_range(gart.pageTableVRAMOffset,
                                      gart.pageTableSize, pteStartIndex,
                                      numPTEs, &pteBaseOffset) ||
-        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr))
+        !gart_checked_add_u64(gart.gartStart, gartOff, &gartMCAddr) ||
+        (reuse && binding->gartMCAddr != gartMCAddr))
         return kIOReturnBadArgument;
 
     const uint64_t pteBytes = (uint64_t)numPTEs * sizeof(uint64_t);
@@ -260,8 +261,14 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
         !gart_checked_bus_span(busAddr, rounded))
         return kIOReturnBadArgument;
 
-    const bool reuse = binding->gartMCAddr != 0 &&
-                       binding->numGPUPages >= numPTEs;
+    if (binding->sysmem.md != nullptr) return kIOReturnBusy;
+    const bool has_metadata = binding->busAddr != 0 || binding->cpuAddr != nullptr ||
+        binding->sizeBytes != 0 || binding->gartOffset != 0 ||
+        binding->gartMCAddr != 0 || binding->numGPUPages != 0;
+    const bool reuse = has_metadata;
+    if (reuse && (binding->gartMCAddr == 0 || binding->busAddr != busAddr ||
+                  binding->sizeBytes != rounded || binding->numGPUPages != numPTEs))
+        return kIOReturnBusy; // exact same backing and extent only; never leave stale tail PTEs
     const uint64_t gartOff = reuse ? binding->gartOffset : gart.nextFreeOffset;
     if ((gartOff & (kAMDGPUGPUPageSize - 1)) != 0 ||
         !gart_checked_range(gart.gartSize, gartOff, rounded))
@@ -282,6 +289,17 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
         return kIOReturnNotReady;
 
     if (!reuse) gart.nextFreeOffset = gartOff + rounded;
+    // Retain exact owner/slot metadata before PTE writes. On an HDP timeout,
+    // the caller can retry only this same mapping; it cannot silently replace
+    // the backing or shrink the extent and expose stale tail PTEs.
+    binding->sysmem = SysMem{};
+    binding->busAddr = busAddr;
+    binding->cpuAddr = nullptr;
+    binding->sizeBytes = rounded;
+    binding->gartOffset = gartOff;
+    binding->gartMCAddr = gartMCAddr;
+    binding->numGPUPages = numPTEs;
+    binding->bind_acknowledged = false;
     for (uint32_t i = 0; i < numPTEs; i++) {
         const uint64_t physAddr = busAddr + (uint64_t)i * kAMDGPUGPUPageSize;
         const uint64_t pte = (physAddr & ~((uint64_t)0xFFFULL)) |
@@ -299,13 +317,7 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
         return kIOReturnNotReady;
     }
 
-    binding->sysmem      = SysMem{};
-    binding->busAddr     = busAddr;
-    binding->cpuAddr     = nullptr;
-    binding->sizeBytes   = rounded;
-    binding->gartOffset  = gartOff;
-    binding->gartMCAddr  = gartMCAddr;
-    binding->numGPUPages = numPTEs;
+    binding->bind_acknowledged = true;
 
     GART_LOG("bind_existing: %llu bytes @ bus=%#llx -> gart_mc=%#llx "
              "(%u PTEs at PT idx %llu)",
