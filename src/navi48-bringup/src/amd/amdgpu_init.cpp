@@ -914,7 +914,11 @@ void bringup_teardown(BringupContext &ctx) {
     //      without this the next load's psp_ring_create is refused with
     //      status 0x115 and the ladder stops at stage 6. Found by the first
     //      kmutil unload/load test.
-    if (ctx.psp.ringCreated) psp_ring_destroy(dev, ctx.psp);
+    if (ctx.psp.ringCreated) {
+        const kern_return_t r = psp_ring_destroy(dev, ctx.psp);
+        INIT_LOG("teardown: PSP DESTROY_RINGS %s (%#x)",
+                 r == kIOReturnSuccess ? "acknowledged" : "not acknowledged", r);
+    }
 
     // (5) Release every allocation, innermost first. Each of these is a
     //     no-op on a context that never got that far.
