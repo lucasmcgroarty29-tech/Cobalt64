@@ -909,7 +909,7 @@ void bringup_teardown(BringupContext &ctx) {
     //     no-op on a context that never got that far.
     for (uint32_t i = 0; i < kSDMAInstanceCount; i++)
         sdma_release_storage(ctx.gmc, ctx.sdma.instance[i]);
-    mes_release_storage(ctx.mes);
+    mes_release_storage(ctx.gmc, ctx.mes);
     cp_compute_queue_release(ctx.gmc, ctx.kcq);
     cp_release_storage(ctx.gmc, ctx.cp);
     ih_release(ctx.ih);
