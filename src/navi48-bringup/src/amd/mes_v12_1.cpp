@@ -239,6 +239,10 @@ mes_alloc_storage(DeviceContext &dev, GMCContext &gmc, MESInstance &inst)
 void
 mes_release_storage(GMCContext &gmc, MESContext &mes)
 {
+    if (mes.queue_ownership_uncertain) {
+        MES_LOG("release_storage refused — queue removal was not acknowledged; MES backing remains quarantined");
+        return;
+    }
     for (uint32_t p = 0; p < kMaxMESPipes; ++p) {
         if (mes.pipe[p].enabled) {
             MES_LOG("release_storage refused — MES pipe %u is still enabled; ring/queue/context backing remains quarantined", p);
