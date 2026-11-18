@@ -917,6 +917,11 @@ void bringup_teardown(BringupContext &ctx) {
     mes_release_storage(ctx.gmc, ctx.mes);
     cp_compute_queue_release(ctx.gmc, ctx.kcq);
     cp_release_storage(ctx.gmc, ctx.cp);
+    if (!ctx.gmc.mmhub.gart_enabled && !ctx.gmc.gfxhub.gart_enabled) {
+        sysmem_free(ctx.pdb0TestPage);
+    } else if (ctx.pdb0TestPage.valid()) {
+        INIT_LOG("teardown: retaining PDB0 GART self-test page; at least one translation hub remains enabled");
+    }
     ih_release(ctx.ih);
     psp_release(ctx.psp);
     gmc_release_resources(ctx.gmc);
