@@ -375,6 +375,10 @@ psp_read_runtime_db(DeviceContext &dev, PSPContext &psp,
 void
 psp_release(PSPContext &psp)
 {
+    if (psp.ringCreated) {
+        PSP_LOG("release refused — PSP did not acknowledge DESTROY_RINGS; preserving ring ownership state for next-load adoption");
+        return;
+    }
     psp.tmrBusAddr      = 0;
     psp.tmrVRAMOffset   = 0;
     psp.tmrSize         = 0;
