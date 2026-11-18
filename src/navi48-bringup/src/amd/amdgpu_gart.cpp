@@ -235,10 +235,10 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
 // address range. No buffer alloc. The caller owns the memory; this
 // only programs the page table.
 //
-// Reuse semantics: pass a binding with non-zero gartMCAddr to RE-USE
-// the previously assigned slot (avoids burning bump-allocator space
-// when the host swaps the buffer's contents but the busAddr/size are
-// stable). Pass a zero-initialised binding to allocate fresh.
+// Reuse semantics: an existing binding may be retried only for the exact
+// same bus address, rounded size, page count and computed MC slot. A zero-
+// initialised binding allocates a fresh slot; changed backing or extent is
+// rejected so no stale tail PTEs or old owner metadata can be overwritten.
 //============================================================
 kern_return_t
 gart_bind_existing(DeviceContext &dev, GARTContext &gart,
@@ -314,9 +314,8 @@ gart_bind_existing(DeviceContext &dev, GARTContext &gart,
                             &pte, sizeof(pte));
     }
     if (!amdgpu_hdp_flush(dev)) {
-        // The range was already consumed for a fresh binding. For reuse, keep
-        // the existing binding metadata and leave the caller's new bus range owned
-        // by the caller; either way, do not report a usable mapping.
+        // The slot metadata remains published with bind_acknowledged=false.
+        // The caller still owns the backing memory; do not report a usable mapping.
         GART_LOG("bind_existing: HDP flush unavailable; refusing mapping success at %#llx",
                  (unsigned long long)gartMCAddr);
         return kIOReturnNotReady;
