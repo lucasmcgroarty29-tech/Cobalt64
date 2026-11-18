@@ -144,6 +144,9 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
                  GARTBinding *outBinding)
 {
     if (outBinding == nullptr) return kIOReturnBadArgument;
+    if (outBinding->sysmem.valid() || outBinding->busAddr != 0 ||
+        outBinding->gartMCAddr != 0 || outBinding->numGPUPages != 0)
+        return kIOReturnBusy; // never overwrite an owner handle or live slot
     if (gart.numPTEs == 0) {
         GART_LOG("bind: GART not initialised");
         return kIOReturnNotReady;
@@ -182,6 +185,17 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
         return kIOReturnBadArgument;
     }
 
+    // Publish the owner handle BEFORE touching PTEs. If the HDP flush below
+    // fails, the caller still has the only SysMem reference and can retain it
+    // in quarantine instead of losing it when this stack frame returns.
+    outBinding->sysmem      = m;
+    outBinding->busAddr     = m.bus;
+    outBinding->cpuAddr     = m.cpu;
+    outBinding->sizeBytes   = roundedSize;
+    outBinding->gartOffset  = gartOff;
+    outBinding->gartMCAddr  = gartMCAddr;
+    outBinding->numGPUPages = numPTEs;
+
     for (uint32_t i = 0; i < numPTEs; i++) {
         const uint64_t physAddr = m.bus + (uint64_t)i * kAMDGPUGPUPageSize;
         const uint64_t pte = (physAddr & ~((uint64_t)0xFFFULL)) |
@@ -200,13 +214,6 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
         return kIOReturnNotReady;
     }
 
-    outBinding->sysmem      = m;
-    outBinding->busAddr     = m.bus;
-    outBinding->cpuAddr     = m.cpu;
-    outBinding->sizeBytes   = roundedSize;
-    outBinding->gartOffset  = gartOff;
-    outBinding->gartMCAddr  = gartMCAddr;
-    outBinding->numGPUPages = numPTEs;
     gart.nextFreeOffset = gartOff + roundedSize;
 
     GART_LOG("bind: %llu bytes @ bus=%#llx -> gart_mc=%#llx "
