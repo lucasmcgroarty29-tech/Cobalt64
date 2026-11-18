@@ -350,7 +350,9 @@ sdma_release_storage(GMCContext &gmc, SDMAInstance &inst)
             gmc.vram_alloc.free(a);
         }
     }
-    if (!inst.wb_in_vram) sysmem_free(inst.wb_sysmem);
+    // Also release a retained failed-bind allocation after hub retirement,
+    // even when this instance successfully fell back to a VRAM writeback page.
+    sysmem_free(inst.wb_sysmem);
     inst.inited  = false;
     inst.enabled = false;
     inst.wb_cpu   = nullptr;
