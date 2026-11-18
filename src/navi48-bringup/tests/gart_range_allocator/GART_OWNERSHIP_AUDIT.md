@@ -780,6 +780,16 @@ size, page count and computed MC address. A smaller replacement can no longer
 leave stale tail PTEs reachable, and a failed attempt can only retry that same
 mapping. Host-side tests cover the exact-match policy.
 
+## Adjacent DMA resource teardown guards (2026-11-18)
+
+- IH now reads back `IH_RB_CNTL` after clearing `RB_ENABLE`. If the bit remains set,
+  disable returns an error and `ih_release` refuses to free the ring/writeback pages.
+- MES storage release now also refuses while any MES scheduler pipe remains enabled,
+  even if a future teardown path has already retired the GART hubs.
+- PSP teardown records the `DESTROY_RINGS` acknowledgement. If PSP does not acknowledge,
+  `psp_release` preserves the ring ownership state rather than resetting software state
+  as though the hardware ring had been destroyed.
+
 The host-side lifecycle model now also records independently confirmed in-flight
 completions after a mapping has entered quarantine. The state remains terminally
 quarantined: completion accounting cannot clear PTEs, invalidate contexts, or make
