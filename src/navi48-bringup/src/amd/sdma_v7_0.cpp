@@ -255,7 +255,9 @@ sdma_alloc_storage(DeviceContext &dev, SDMAInstance &inst, GMCContext &gmc)
             SDMA_LOG("instance %u: GART bind of WB page failed: %#x — "
                      "falling back to a VRAM writeback page",
                      inst.instance, r);
-            sysmem_free(inst.wb_sysmem);
+            // A failed bind may have left partially programmed PTEs. Keep
+            // the owner handle while falling back to VRAM; guarded teardown
+            // releases it only after both GART hubs are disabled.
         }
     } else {
         SDMA_LOG("instance %u: WB sysmem alloc failed: %#x — falling back "
