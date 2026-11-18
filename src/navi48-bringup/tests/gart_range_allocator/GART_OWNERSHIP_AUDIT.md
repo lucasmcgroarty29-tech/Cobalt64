@@ -784,8 +784,12 @@ mapping. Host-side tests cover the exact-match policy.
 
 - IH now reads back `IH_RB_CNTL` after clearing `RB_ENABLE`. If the bit remains set,
   disable returns an error and `ih_release` refuses to free the ring/writeback pages.
-- MES storage release now also refuses while any MES scheduler pipe remains enabled,
-  even if a future teardown path has already retired the GART hubs.
+- MES storage release now refuses while any scheduler pipe remains enabled or
+  queue removal is uncertain, even if a future teardown path has already retired the
+  GART hubs.
+- SDMA teardown now requires both queue RB/IB disable readback and MCU HALT readback
+  before clearing the instance's enabled state. Failed acknowledgements latch
+  `submission_uncertain`, so backing cannot be released.
 - PSP teardown records the `DESTROY_RINGS` acknowledgement. If PSP does not acknowledge,
   `psp_release` preserves the ring ownership state rather than resetting software state
   as though the hardware ring had been destroyed.
