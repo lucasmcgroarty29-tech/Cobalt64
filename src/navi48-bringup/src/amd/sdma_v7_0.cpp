@@ -389,10 +389,14 @@ sdma_engine_halt(const DeviceContext &dev, uint32_t instance, bool halt)
     v = REG_SET_FIELD(v, SDMA0_SDMA_MCU_CNTL, HALT, halt ? 1u : 0u);
     v = REG_SET_FIELD(v, SDMA0_SDMA_MCU_CNTL, RESET, 0u);
     WREG32(dev, reg, v);
+    const uint32_t readback = RREG32(dev, reg);
+    const bool acknowledged =
+        REG_GET_FIELD(readback, SDMA0_SDMA_MCU_CNTL, HALT) == (halt ? 1u : 0u);
     SDMA_LOG("SDMA%u MCU_CNTL @dword %#x: %#010x -> %#010x (HALT=%u) "
-             "readback=%#010x",
-             instance, reg, before, v, halt ? 1u : 0u, RREG32(dev, reg));
-    return kIOReturnSuccess;
+             "readback=%#010x (%s)",
+             instance, reg, before, v, halt ? 1u : 0u, readback,
+             acknowledged ? "ACKNOWLEDGED" : "NOT ACKNOWLEDGED");
+    return acknowledged ? kIOReturnSuccess : kIOReturnNotReady;
 }
 
 //------------------------------------------------------------------
@@ -602,7 +606,11 @@ sdma_gfx_resume_instance(const DeviceContext &dev, SDMAInstance &inst)
 
     // 13) Unhalt engine via MCU_CNTL.
     SDMA_LOG("SDMA%u  unhalting MCU (writing MCU_CNTL.HALT=0, RESET=0)", i);
-    sdma_engine_halt(dev, i, false);
+    const kern_return_t unhalt = sdma_engine_halt(dev, i, false);
+    if (unhalt != kIOReturnSuccess) {
+        SDMA_LOG("SDMA%u: MCU unhalt was not acknowledged; refusing to enable RB/IB", i);
+        return unhalt;
+    }
 
     // 14) Enable the ring + IB.
     rb_cntl = REG_SET_FIELD(rb_cntl, SDMA0_SDMA_QUEUE0_RB_CNTL, RB_ENABLE, 1);
