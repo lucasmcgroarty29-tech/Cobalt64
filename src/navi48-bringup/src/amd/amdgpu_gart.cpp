@@ -144,8 +144,10 @@ gart_bind_sysmem(DeviceContext &dev, GARTContext &gart,
                  GARTBinding *outBinding)
 {
     if (outBinding == nullptr) return kIOReturnBadArgument;
-    if (outBinding->sysmem.valid() || outBinding->busAddr != 0 ||
-        outBinding->gartMCAddr != 0 || outBinding->numGPUPages != 0)
+    if (outBinding->sysmem.md != nullptr || outBinding->busAddr != 0 ||
+        outBinding->cpuAddr != nullptr || outBinding->sizeBytes != 0 ||
+        outBinding->gartOffset != 0 || outBinding->gartMCAddr != 0 ||
+        outBinding->numGPUPages != 0)
         return kIOReturnBusy; // never overwrite an owner handle or live slot
     if (gart.numPTEs == 0) {
         GART_LOG("bind: GART not initialised");
