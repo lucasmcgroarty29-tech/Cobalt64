@@ -48,6 +48,7 @@ struct GARTBinding {
     uint64_t  gartOffset  { 0 };  // byte offset into the GART aperture
     uint64_t  gartMCAddr  { 0 };  // gartStart + gartOffset — what PSP uses
     uint32_t  numGPUPages { 0 };  // number of 4 KB PTEs used
+    bool      bind_acknowledged { false }; // HDP flush confirmed after PTE writes
 };
 
 struct GARTContext {
